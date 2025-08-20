@@ -1,11 +1,15 @@
 -- Cmd–Shift–X: record system audio (BlackHole) + microphone
--- After stopping: open audio file and transcribe with Deepgram → copy transcript to clipboard
+-- After stopping: transcribe with Deepgram → copy transcript to clipboard → optional auto-paste
 
 -- Configurable paths
 local homeDirectory = os.getenv("HOME")
 local recordingsDirectory = homeDirectory .. "/Recordings"
 local transcribeScript = homeDirectory .. "/.hammerspoon/whisper-clipboard-cli/scripts/transcribe_and_copy.py"
 local envFilePath = homeDirectory .. "/.hammerspoon/whisper-clipboard-cli/.env"
+local uvPath = "/opt/homebrew/bin/uv" -- adjust if uv is elsewhere
+
+-- Behavior
+local autoPasteAfterCopy = true
 
 -- Audio settings
 local audioSampleRate = 48000
@@ -75,11 +79,20 @@ local function runTranscription(path)
   end
 
   hs.alert.show("Transcribing…")
-  local cmd = string.format("%q --api-key %q %q", transcribeScript, apiKey, path)
+  local cmd
+  if hs.fs.attributes(uvPath) then
+    cmd = string.format("%q run --no-project %q --api-key %q %q", uvPath, transcribeScript, apiKey, path)
+  else
+    cmd = string.format("python3 %q --api-key %q %q", transcribeScript, apiKey, path)
+  end
   hs.task.new("/bin/bash", function(exitCode, stdOut, stdErr)
     if exitCode == 0 then
-      hs.alert.show("Transcript copied to clipboard")
-      if stdOut and #stdOut > 0 then print(stdOut) end
+      hs.alert.show("Copied to clipboard")
+      if autoPasteAfterCopy then
+        hs.timer.doAfter(0.05, function()
+          hs.eventtap.keyStroke({"cmd"}, "v", 0)
+        end)
+      end
     else
       hs.alert.show("Transcription failed")
       if stdErr and #stdErr > 0 then print(stdErr) end
@@ -104,13 +117,9 @@ local function startRecording()
     -ar %d -c:a aac -b:a %s "%s"]],
     ffmpegPath, systemAudioDevice, microphoneDevice, audioSampleRate, audioBitrate, outFile)
 
-  print("Starting ffmpeg with command:\n" .. cmd)
-  recordingTask = hs.task.new("/bin/bash", function()
-    hs.alert.show("Recording saved")
-  end, {"-lc", cmd})
-
+  recordingTask = hs.task.new("/bin/bash", function() end, {"-lc", cmd})
   recordingTask:start()
-  hs.alert.show("Recording… (Cmd–Shift–X to stop)")
+  hs.alert.show("Recording started")
 end
 
 local function stopRecording()
@@ -124,15 +133,12 @@ local function stopRecording()
     end
   end
   recordingTask = nil
+  hs.alert.show("Recording ended")
 
   if lastOutputFile then
-    hs.timer.doAfter(0.8, function()
+    hs.timer.doAfter(0.5, function()
       if hs.fs.attributes(lastOutputFile) then
-        hs.alert.show("Opening: " .. lastOutputFile)
-        hs.task.new("/usr/bin/open", function() end, {lastOutputFile}):start()
         runTranscription(lastOutputFile)
-      else
-        print("File not found yet: " .. lastOutputFile)
       end
     end)
   end
