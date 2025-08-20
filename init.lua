@@ -1,12 +1,13 @@
 -- Toggle recording of system audio (BlackHole) + microphone with Cmd–Shift–X
 
 local recordingTask = nil
+local lastOutputFile = nil
 local outputDirectory = os.getenv("HOME") .. "/Recordings"
 local audioSampleRate = 48000
 local audioBitrate = "192k"
 local fileExtension = "m4a" -- change to "wav" if you prefer
 
--- Robustly find ffmpeg (Hammerspoon's PATH may be minimal)
+-- Prefer hardcoded Homebrew path; fall back to search (Hammerspoon PATH is minimal)
 local function findFFmpeg()
   local candidates = {
     "/opt/homebrew/bin/ffmpeg",
@@ -22,8 +23,12 @@ local function findFFmpeg()
 end
 
 local ffmpegPath = findFFmpeg()
-if not ffmpegPath then
-  hs.alert.show("ffmpeg not found. Install via Homebrew: brew install ffmpeg")
+if ffmpegPath then
+  print("ffmpeg detected at: " .. ffmpegPath)
+  hs.alert.show("ffmpeg: " .. ffmpegPath)
+else
+  print("ffmpeg NOT found in common paths or shell")
+  hs.alert.show("ffmpeg not found. brew install ffmpeg")
 end
 
 -- Using indices from your device list: BlackHole 2ch (:1) and MacBook Pro Microphone (:4)
@@ -38,12 +43,15 @@ local function startRecording()
   hs.fs.mkdir(outputDirectory)
   local timestamp = os.date("%Y-%m-%d_%H-%M-%S")
   local outFile = string.format("%s/audio-%s.%s", outputDirectory, timestamp, fileExtension)
+  lastOutputFile = outFile
   local cmd = string.format([[%s -hide_banner -loglevel error \
     -f avfoundation -i "%s" \
     -f avfoundation -i "%s" \
     -filter_complex "amix=inputs=2:duration=longest:dropout_transition=2" \
     -ar %d -c:a aac -b:a %s "%s"]],
     ffmpegPath, systemAudioDevice, microphoneDevice, audioSampleRate, audioBitrate, outFile)
+
+  print("Starting ffmpeg with command:\n" .. cmd)
 
   recordingTask = hs.task.new("/bin/bash", function()
     hs.alert.show("Recording saved")
@@ -56,15 +64,25 @@ end
 local function stopRecording()
   if recordingTask and recordingTask:isRunning() then
     local pid = recordingTask:pid()
+    print("Stopping ffmpeg with PID: " .. tostring(pid))
     if pid then
-      -- Send SIGINT so ffmpeg finalizes the file cleanly
       hs.task.new("/bin/kill", function() end, {"-INT", tostring(pid)}):start()
     else
-      -- Fallback: terminate the task (may not finalize container in rare cases)
       recordingTask:terminate()
     end
   end
   recordingTask = nil
+  -- Open the saved file shortly after stopping so you can hear it
+  if lastOutputFile then
+    hs.timer.doAfter(0.6, function()
+      if hs.fs.attributes(lastOutputFile) then
+        hs.alert.show("Opening: " .. lastOutputFile)
+        hs.task.new("/usr/bin/open", function() end, {lastOutputFile}):start()
+      else
+        print("File not found yet: " .. lastOutputFile)
+      end
+    end)
+  end
 end
 
 local function toggleRecording()
