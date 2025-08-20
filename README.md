@@ -30,8 +30,7 @@ ffmpeg -f avfoundation -list_devices true -i ""
 Note the BlackHole device and your microphone (name or index).
 
 4) Add the hotkey script to Hammerspoon
-- Create/edit `~/.hammerspoon/init.lua` and paste the script from [`docs/setup.md`](docs/setup.md)
-- Update `systemAudioDevice` and `microphoneDevice`
+- Either follow [`docs/deployment.md`](docs/deployment.md) to install into `~/.hammerspoon`, or manually paste the script from [`docs/setup.md`](docs/setup.md)
 
 5) Permissions & login
 - Open Hammerspoon → allow **Accessibility**
@@ -44,9 +43,10 @@ Note the BlackHole device and your microphone (name or index).
 - Find files in `~/Recordings`
 
 ### Transcription + Clipboard
-- To automatically transcribe the audio with Deepgram and copy it to the clipboard, follow:
-  - Plan: [`docs/transcription-plan.md`](docs/transcription-plan.md)
-  - Setup guide and Python script: [`docs/transcription-setup.md`](docs/transcription-setup.md)
+- Plan: [`docs/transcription-plan.md`](docs/transcription-plan.md)
+- Setup: [`docs/transcription-setup.md`](docs/transcription-setup.md)
+- Deploy to Hammerspoon: [`docs/deployment.md`](docs/deployment.md)
+- Environment: `.env.example` → copy as `.env` and set `DEEPGRAM_API_KEY`
 
 ### Notes
 - To record WAV instead of M4A: set `fileExtension = "wav"` and change codec to `-c:a pcm_s16le` in the script.
