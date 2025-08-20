@@ -1,6 +1,6 @@
 ## Deploying configs into Hammerspoon
 
-This repo includes a script to copy the configuration and scripts into `~/.hammerspoon/whisper-clipboard-cli` and reload Hammerspoon.
+This repo includes a script to copy the configuration and scripts into `~/.hammerspoon/whisper-clipboard-cli` and reload Hammerspoon. It also supports `uv`-based execution for Python deps.
 
 ### One-time install
 ```bash
@@ -8,8 +8,8 @@ This repo includes a script to copy the configuration and scripts into `~/.hamme
 ```
 - If `~/.hammerspoon/init.lua` is empty/missing, a minimal loader is created to include our config automatically.
 - Files copied to `~/.hammerspoon/whisper-clipboard-cli/`:
-  - `init.lua` (Hammerspoon config)
-  - `scripts/transcribe_and_copy.py`
+  - `init.lua` (Hammerspoon config; no auto-open, streamlined alerts, optional auto-paste)
+  - `scripts/transcribe_and_copy.py` (with inline deps header for `uv run`)
   - `.env` (from `.env.example` if missing)
 
 ### Configure your API key
@@ -17,7 +17,7 @@ This repo includes a script to copy the configuration and scripts into `~/.hamme
 
 ### After install
 - Press Cmd–Shift–X to toggle recording
-- After stopping, audio opens; transcription runs; transcript is copied to clipboard
+- After stopping, transcription runs; transcript is copied to clipboard (and optionally auto-pasted)
 - Sidecar transcript saved next to audio: `~/Recordings/transcripts_tmp/*.txt`
 
 ### Updating
