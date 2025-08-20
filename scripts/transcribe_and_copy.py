@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "requests<3",
+#   "certifi>=2024.7.4",
+# ]
+# ///
+
 import argparse
 import json
 import os
 import sys
-import urllib.parse
-import urllib.request
 import subprocess
 from typing import Optional
+
+import requests
+import certifi
 
 DEEGRAM_API_URL = "https://api.deepgram.com/v1/listen"
 
@@ -26,19 +35,25 @@ def transcribe_file(path: str, api_key: str) -> str:
     with open(path, "rb") as f:
         data = f.read()
 
+    headers = {
+        "Authorization": f"Token {api_key}",
+        "Content-Type": "audio/m4a",
+    }
     params = {
         "model": "nova-2",
         "smart_format": "true",
     }
-    url = f"{DEEGRAM_API_URL}?{urllib.parse.urlencode(params)}"
 
-    req = urllib.request.Request(url, method="POST")
-    req.add_header("Authorization", f"Token {api_key}")
-    # Assume m4a; Deepgram will handle common codecs. Adjust if you change format.
-    req.add_header("Content-Type", "audio/m4a")
-
-    with urllib.request.urlopen(req, data=data, timeout=600) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
+    r = requests.post(
+        DEEGRAM_API_URL,
+        headers=headers,
+        params=params,
+        data=data,
+        timeout=600,
+        verify=certifi.where(),
+    )
+    r.raise_for_status()
+    payload = r.json()
 
     transcript = (
         payload.get("results", {})
@@ -83,9 +98,9 @@ def main() -> int:
         copy_to_clipboard(transcript)
         print(json.dumps({"ok": True, "transcript_file": sidecar}))
         return 0
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="ignore")
-        print(f"HTTP error: {e.code} {e.reason} {body}", file=sys.stderr)
+    except requests.HTTPError as e:
+        body = e.response.text if e.response is not None else ""
+        print(f"HTTP error: {e} {body}", file=sys.stderr)
         return 1
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
