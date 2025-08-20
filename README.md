@@ -43,9 +43,10 @@ Note the BlackHole device and your microphone (name or index).
 - Cmd–Shift–X to stop
 - Find files in `~/Recordings`
 
-### Docs
-- Plan: [`docs/plan.md`](docs/plan.md)
-- Setup guide (with script): [`docs/setup.md`](docs/setup.md)
+### Transcription + Clipboard
+- To automatically transcribe the audio with Deepgram and copy it to the clipboard, follow:
+  - Plan: [`docs/transcription-plan.md`](docs/transcription-plan.md)
+  - Setup guide and Python script: [`docs/transcription-setup.md`](docs/transcription-setup.md)
 
 ### Notes
 - To record WAV instead of M4A: set `fileExtension = "wav"` and change codec to `-c:a pcm_s16le` in the script.
