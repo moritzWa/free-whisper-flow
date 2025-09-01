@@ -1,6 +1,6 @@
 {
   "name": "whisper-clipboard-cli",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Own your transcription workflow. Press Cmd+Shift+X, speak, get text in clipboard instantly.",
   "main": "index.js",
   "bin": {

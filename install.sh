@@ -154,7 +154,7 @@ mkdir -p "$TARGET_DIR/scripts"
 
 # Copy and update init.lua with detected microphone
 echo "Configuring Hammerspoon script with detected microphone..."
-sed "s|local microphoneDevice  = \":[0-9]*\"|local microphoneDevice  = \"$microphone_device\"|" \
+sed "s|local microphoneDevice[[:space:]]*=[[:space:]]*\":[0-9]*\"|local microphoneDevice  = \"$microphone_device\"|" \
     "$PROJECT_DIR/hammerspoon/init.lua" > "$TARGET_DIR/init.lua"
 
 # Copy transcription script
