@@ -1,0 +1,19 @@
+# Include only what's needed for the installer
+!package.json
+!index.js
+!install.sh
+!scripts/
+!hammerspoon/
+!README.md
+
+# Exclude everything else
+*
+!*/
+
+# Re-exclude common files we don't want
+.git/
+.DS_Store
+node_modules/
+*.log
+demo.gif
+.env*

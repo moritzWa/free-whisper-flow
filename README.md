@@ -1,53 +1,52 @@
-## Cmd–Shift–X Audio Recorder (macOS)
+## Whisper Clipboard CLI
 
-Press Cmd–Shift–X to start/stop recording a single audio file that mixes your system audio (what you hear) and your microphone. Files are saved to `~/Recordings`.
+**Own your transcription workflow.** Press **Cmd+Shift+X**, speak, get text in your clipboard instantly. Zero vendor lock-in, hackable, using free Deepgram credits that last forever.
 
-- **Platform**: macOS
-- **Approach**: Hammerspoon hotkey + ffmpeg recorder + BlackHole virtual device
-- **Why**: Lowest lift, no app to build, works offline
+![Demo](demo.gif)
 
-### Quick start
+## 🚀 One-Line Install
 
-1) Install tools
 ```bash
-# Homebrew (if needed)
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-brew install ffmpeg
-brew install --cask hammerspoon
-brew install blackhole-2ch
+npx whisper-clipboard-cli
 ```
 
-2) Create a Multi-Output Device
-- Open “Audio MIDI Setup” → + → Create Multi-Output Device
-- Select your speakers/headphones AND “BlackHole 2ch”
-- System Settings → Sound → Output: choose the new Multi-Output Device
-
-3) Identify audio devices
+Or clone and run manually:
 ```bash
-ffmpeg -f avfoundation -list_devices true -i ""
+git clone https://github.com/degtrdg/whisper-clipboard-cli.git
+cd whisper-clipboard-cli
+./install.sh
 ```
-Note the BlackHole device and your microphone (name or index).
 
-4) Add the hotkey script to Hammerspoon
-- Either follow [`docs/deployment.md`](docs/deployment.md) to install into `~/.hammerspoon`, or manually paste the script from [`docs/setup.md`](docs/setup.md)
+The installer will:
+- ✅ Install required dependencies (Homebrew, ffmpeg, Hammerspoon)
+- 🎤 Auto-detect your microphone
+- 🔑 Prompt for your Deepgram API key
+- 📦 Set up everything automatically
 
-5) Permissions & login
-- Open Hammerspoon → allow **Accessibility**
-- First record → allow **Microphone**
-- Hammerspoon → Preferences → enable “Launch at login”
+## Usage
 
-6) Use it
-- Cmd–Shift–X to start
-- Cmd–Shift–X to stop
-- Find files in `~/Recordings`
+**Cmd+Shift+X** → speak → **Cmd+Shift+X** → text in clipboard
 
-### Transcription + Clipboard
-- Plan: [`docs/transcription-plan.md`](docs/transcription-plan.md)
-- Setup: [`docs/transcription-setup.md`](docs/transcription-setup.md)
-- Deploy to Hammerspoon: [`docs/deployment.md`](docs/deployment.md)
-- Environment: `.env.example` → copy as `.env` and set `DEEPGRAM_API_KEY`
+That's it. Works everywhere - Slack, code editors, docs, anything. Optional auto-paste saves you the Cmd+V.
 
-### Notes
-- To record WAV instead of M4A: set `fileExtension = "wav"` and change codec to `-c:a pcm_s16le` in the script.
-- If system audio is missing, ensure Output is your Multi-Output Device that includes BlackHole.
+Files: `~/Recordings` (audio) • `~/Recordings/transcripts_tmp` (text)
+
+## Requirements
+
+**Required:**
+- macOS (only tested here, but open to PRs for Windows/Linux)
+- [Deepgram API key](https://deepgram.com) - $200 worth of credits which basically lasts forever
+
+**Auto-installed by installer:**
+- [Homebrew](https://brew.sh) - Package manager for macOS
+- [ffmpeg](https://ffmpeg.org) - Audio recording
+- [Hammerspoon](https://hammerspoon.org) - System automation and hotkeys
+- [uv](https://docs.astral.sh/uv/) - Fast Python runner with automatic dependency management
+
+## Permissions
+
+Grant when prompted:
+- **Accessibility** (Hammerspoon needs this for hotkeys)
+- **Microphone** (on first recording)
+
+Optional: Enable "Launch Hammerspoon at login"

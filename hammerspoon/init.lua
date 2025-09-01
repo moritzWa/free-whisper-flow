@@ -1,4 +1,4 @@
--- Cmd–Shift–X: record system audio (BlackHole) + microphone
+-- Cmd–Shift–X: record microphone audio
 -- After stopping: transcribe with Deepgram → copy transcript to clipboard → optional auto-paste
 
 -- Configurable paths
@@ -16,10 +16,8 @@ local audioSampleRate = 48000
 local audioBitrate = "192k"
 local fileExtension = "m4a" -- change to "wav" if desired
 
--- avfoundation device indices (update if they change on your system)
--- Use: ffmpeg -f avfoundation -list_devices true -i ""
-local systemAudioDevice = ":1"   -- BlackHole 2ch
-local microphoneDevice  = ":4"   -- MacBook Pro Microphone
+-- avfoundation device indices (auto-detected during installation)
+local microphoneDevice  = ":4"   -- Will be auto-detected by installer
 
 -- Internal state
 local recordingTask = nil
@@ -72,6 +70,10 @@ local function runTranscription(path)
     print("Transcription script not found: " .. transcribeScript)
     return
   end
+  if not hs.fs.attributes(uvPath) then
+    hs.alert.show("uv not found at " .. uvPath .. " - reinstall required")
+    return
+  end
   local apiKey = readEnvVarFromFile(envFilePath, "DEEPGRAM_API_KEY")
   if not apiKey or apiKey == "" then
     hs.alert.show("Set DEEPGRAM_API_KEY in ~/.hammerspoon/whisper-clipboard-cli/.env")
@@ -79,12 +81,7 @@ local function runTranscription(path)
   end
 
   hs.alert.show("Transcribing…")
-  local cmd
-  if hs.fs.attributes(uvPath) then
-    cmd = string.format("%q run --no-project %q --api-key %q %q", uvPath, transcribeScript, apiKey, path)
-  else
-    cmd = string.format("python3 %q --api-key %q %q", transcribeScript, apiKey, path)
-  end
+  local cmd = string.format("%q run --no-project %q --api-key %q %q", uvPath, transcribeScript, apiKey, path)
   hs.task.new("/bin/bash", function(exitCode, stdOut, stdErr)
     if exitCode == 0 then
       hs.alert.show("Copied to clipboard")
@@ -112,10 +109,8 @@ local function startRecording()
 
   local cmd = string.format([[%s -hide_banner -loglevel error \
     -f avfoundation -i "%s" \
-    -f avfoundation -i "%s" \
-    -filter_complex "amix=inputs=2:duration=longest:dropout_transition=2" \
     -ar %d -c:a aac -b:a %s "%s"]],
-    ffmpegPath, systemAudioDevice, microphoneDevice, audioSampleRate, audioBitrate, outFile)
+    ffmpegPath, microphoneDevice, audioSampleRate, audioBitrate, outFile)
 
   recordingTask = hs.task.new("/bin/bash", function() end, {"-lc", cmd})
   recordingTask:start()
