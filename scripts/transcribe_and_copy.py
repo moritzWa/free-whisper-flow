@@ -32,6 +32,12 @@ def transcribe_file(path: str, api_key: str) -> str:
     if not os.path.isfile(path):
         raise FileNotFoundError(f"Audio file not found: {path}")
 
+    file_size = os.path.getsize(path)
+
+    if file_size < 1000:
+        print(f"Audio file too small ({file_size} bytes), likely no audio content", file=sys.stderr)
+        return ""
+
     with open(path, "rb") as f:
         data = f.read()
 
@@ -44,6 +50,7 @@ def transcribe_file(path: str, api_key: str) -> str:
         "smart_format": "true",
     }
 
+
     r = requests.post(
         DEEGRAM_API_URL,
         headers=headers,
@@ -52,8 +59,11 @@ def transcribe_file(path: str, api_key: str) -> str:
         timeout=600,
         verify=certifi.where(),
     )
+    
+    
     r.raise_for_status()
     payload = r.json()
+    
 
     transcript = (
         payload.get("results", {})
@@ -61,6 +71,11 @@ def transcribe_file(path: str, api_key: str) -> str:
         .get("alternatives", [{}])[0]
         .get("transcript", "")
     )
+
+    if not transcript:
+        confidence = payload.get("results", {}).get("channels", [{}])[0].get("alternatives", [{}])[0].get("confidence", 0)
+        print(f"No transcript returned (confidence: {confidence})", file=sys.stderr)
+
     return transcript or ""
 
 

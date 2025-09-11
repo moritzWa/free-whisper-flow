@@ -16,8 +16,8 @@ local audioSampleRate = 48000
 local audioBitrate = "192k"
 local fileExtension = "m4a" -- change to "wav" if desired
 
--- avfoundation device indices (auto-detected during installation)
-local microphoneDevice  = ":4"   -- Will be auto-detected by installer
+-- avfoundation device indices (auto-detected dynamically)
+local microphoneDevice = nil  -- Will be auto-detected
 
 -- Internal state
 local recordingTask = nil
@@ -91,10 +91,20 @@ local function runTranscription(path)
         end)
       end
     else
+      print("Transcription failed with exit code: " .. tostring(exitCode))
+      if stdErr and #stdErr > 0 then
+        print("Error details: " .. stdErr)
+      end
       hs.alert.show("Transcription failed")
-      if stdErr and #stdErr > 0 then print(stdErr) end
     end
   end, {"-lc", cmd}):start()
+end
+
+local function getDefaultMicrophone()
+  print("Using system default microphone")
+  -- Use ":default" to let ffmpeg use the system's default audio input device
+  -- This respects the user's Sound Settings preference
+  return ":default"
 end
 
 local function startRecording()
@@ -102,6 +112,10 @@ local function startRecording()
     hs.alert.show("ffmpeg not available")
     return
   end
+
+  -- Use system default microphone
+  microphoneDevice = getDefaultMicrophone()
+
   hs.fs.mkdir(recordingsDirectory)
   local timestamp = os.date("%Y-%m-%d_%H-%M-%S")
   local outFile = string.format("%s/audio-%s.%s", recordingsDirectory, timestamp, fileExtension)
@@ -111,6 +125,8 @@ local function startRecording()
     -f avfoundation -i "%s" \
     -ar %d -c:a aac -b:a %s "%s"]],
     ffmpegPath, microphoneDevice, audioSampleRate, audioBitrate, outFile)
+
+  print("Using microphone device: " .. microphoneDevice .. " for recording")
 
   recordingTask = hs.task.new("/bin/bash", function() end, {"-lc", cmd})
   recordingTask:start()
