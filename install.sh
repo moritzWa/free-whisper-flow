@@ -109,30 +109,32 @@ fi
 
 echo
 
-# Auto-detect microphone
-echo "🎤 Auto-detecting microphone..."
-if microphone_device=$("$PROJECT_DIR/scripts/detect_microphone.sh" 2>/dev/null); then
-    echo "✅ Found microphone: device $microphone_device"
-else
-    echo "❌ Could not auto-detect microphone. You may need to configure manually."
-    microphone_device=":0"  # fallback
+echo
+
+# Check for existing Deepgram API key
+deepgram_key=""
+if [[ -f "${TARGET_DIR}/.env" ]] && grep -q "DEEPGRAM_API_KEY=" "${TARGET_DIR}/.env"; then
+    existing_key=$(grep "DEEPGRAM_API_KEY=" "${TARGET_DIR}/.env" | cut -d'=' -f2 | tr -d '"' | tr -d "'")
+    if [[ -n "${existing_key}" && "${existing_key}" != "your_api_key_here" ]]; then
+        echo "🔑 Found existing Deepgram API key"
+        deepgram_key="${existing_key}"
+    fi
 fi
 
-echo
+# Get Deepgram API key if not found
+if [[ -z "${deepgram_key}" ]]; then
+    echo "🔑 Deepgram API Key Setup"
+    echo "You need a Deepgram API key for transcription."
+    echo "Get one free at: https://deepgram.com"
+    echo
 
-# Get Deepgram API key
-echo "🔑 Deepgram API Key Setup"
-echo "You need a Deepgram API key for transcription."
-echo "Get one free at: https://deepgram.com"
-echo
-
-deepgram_key=""
-while [[ -z "$deepgram_key" ]]; do
-    read -p "Enter your Deepgram API key: " -r deepgram_key
-    if [[ -z "$deepgram_key" ]]; then
-        echo "API key is required for transcription."
-    fi
-done
+    while [[ -z "${deepgram_key}" ]]; do
+        read -p "Enter your Deepgram API key: " -r deepgram_key
+        if [[ -z "${deepgram_key}" ]]; then
+            echo "API key is required for transcription."
+        fi
+    done
+fi
 
 echo
 
@@ -150,21 +152,20 @@ fi
 
 # Install files
 echo "📦 Installing files..."
-mkdir -p "$TARGET_DIR/scripts"
+mkdir -p "${TARGET_DIR}/scripts"
 
-# Copy and update init.lua with detected microphone
-echo "Configuring Hammerspoon script with detected microphone..."
-sed "s|local microphoneDevice[[:space:]]*=[[:space:]]*\":[0-9]*\"|local microphoneDevice  = \"$microphone_device\"|" \
-    "$PROJECT_DIR/hammerspoon/init.lua" > "$TARGET_DIR/init.lua"
+# Copy Hammerspoon script
+echo "Installing Hammerspoon configuration..."
+cp "${PROJECT_DIR}/hammerspoon/init.lua" "${TARGET_DIR}/init.lua"
 
 # Copy transcription script
-cp "$PROJECT_DIR/scripts/transcribe_and_copy.py" "$TARGET_DIR/scripts/"
-chmod +x "$TARGET_DIR/scripts/transcribe_and_copy.py"
+cp "${PROJECT_DIR}/scripts/transcribe_and_copy.py" "${TARGET_DIR}/scripts/"
+chmod +x "${TARGET_DIR}/scripts/transcribe_and_copy.py"
 
 # Create .env file with API key
-echo "DEEPGRAM_API_KEY=$deepgram_key" > "$TARGET_DIR/.env"
+echo "DEEPGRAM_API_KEY=${deepgram_key}" > "${TARGET_DIR}/.env"
 
-echo "✅ Files installed to $TARGET_DIR"
+echo "✅ Files installed to ${TARGET_DIR}"
 
 # Setup Hammerspoon loader
 if [[ ! -f "$HAMMERSPOON_INIT" ]] || [[ ! -s "$HAMMERSPOON_INIT" ]]; then
@@ -214,9 +215,9 @@ echo "Usage:"
 echo "• Press Cmd+Shift+X to start/stop recording"
 echo "• Recordings are saved to ~/Recordings"
 echo "• Transcripts are automatically copied to clipboard"
+echo "• Uses your system's default microphone (set in System Settings > Sound)"
 echo
 echo "Files installed:"
-echo "• Configuration: $TARGET_DIR"
-echo "• Microphone device: $microphone_device"
-echo "• API key: configured in $TARGET_DIR/.env"
+echo "• Configuration: ${TARGET_DIR}"
+echo "• API key: configured in ${TARGET_DIR}/.env"
 echo
