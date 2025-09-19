@@ -19,9 +19,17 @@ local fileExtension = "m4a" -- change to "wav" if desired
 -- avfoundation device indices (auto-detected dynamically)
 local microphoneDevice = nil  -- Will be auto-detected
 
+-- Create custom style for bottom alerts
+local bottomStyle = {table.unpack(hs.alert.defaultStyle)}
+bottomStyle.atScreenEdge = 2
+
+-- Test alert to verify bottom positioning
+hs.alert.show("Config loaded - alerts at bottom", bottomStyle, 3)
+
 -- Internal state
 local recordingTask = nil
 local lastOutputFile = nil
+local recordingAlert = nil
 
 -- Find ffmpeg in common locations and via a login shell
 local function findFFmpeg()
@@ -42,7 +50,7 @@ local ffmpegPath = findFFmpeg()
 if ffmpegPath then
   print("ffmpeg detected at: " .. ffmpegPath)
 else
-  hs.alert.show("ffmpeg not found. brew install ffmpeg")
+  hs.alert.show("ffmpeg not found. brew install ffmpeg", bottomStyle)
 end
 
 -- Simple .env reader (KEY=VALUE, supports quoted values)
@@ -71,16 +79,16 @@ local function runTranscription(path)
     return
   end
   if not hs.fs.attributes(uvPath) then
-    hs.alert.show("uv not found at " .. uvPath .. " - reinstall required")
+    hs.alert.show("uv not found at " .. uvPath .. " - reinstall required", bottomStyle)
     return
   end
   local apiKey = readEnvVarFromFile(envFilePath, "DEEPGRAM_API_KEY")
   if not apiKey or apiKey == "" then
-    hs.alert.show("Set DEEPGRAM_API_KEY in ~/.hammerspoon/whisper-clipboard-cli/.env")
+    hs.alert.show("Set DEEPGRAM_API_KEY in ~/.hammerspoon/whisper-clipboard-cli/.env", bottomStyle)
     return
   end
 
-  hs.alert.show("Transcribing…")
+  hs.alert.show("Transcribing…", bottomStyle)
   local cmd = string.format("%q run --no-project %q --api-key %q %q", uvPath, transcribeScript, apiKey, path)
   hs.task.new("/bin/bash", function(exitCode, stdOut, stdErr)
     print("📝 Transcription completed with exit code: " .. tostring(exitCode))
@@ -88,7 +96,7 @@ local function runTranscription(path)
     print("📝 Transcription stderr: " .. (stdErr or "(empty)"))
 
     if exitCode == 0 then
-      hs.alert.show("Copied to clipboard")
+      hs.alert.show("Copied to clipboard", bottomStyle)
       if autoPasteAfterCopy then
         hs.timer.doAfter(0.05, function()
           hs.eventtap.keyStroke({"cmd"}, "v", 0)
@@ -99,7 +107,7 @@ local function runTranscription(path)
       if stdErr and #stdErr > 0 then
         print("📝 Error details: " .. stdErr)
       end
-      hs.alert.show("Transcription failed")
+      hs.alert.show("Transcription failed", bottomStyle)
     end
   end, {"-lc", cmd}):start()
 end
@@ -113,7 +121,7 @@ end
 
 local function startRecording()
   if not ffmpegPath then
-    hs.alert.show("ffmpeg not available")
+    hs.alert.show("ffmpeg not available", bottomStyle)
     return
   end
 
@@ -134,11 +142,21 @@ local function startRecording()
 
   recordingTask = hs.task.new("/bin/bash", function() end, {"-lc", cmd})
   recordingTask:start()
-  hs.alert.show("Recording started")
+
+  -- Show persistent recording indicator
+  recordingAlert = hs.alert.show("🔴 Recording... (Cmd+Shift+M to stop)", bottomStyle, hs.screen.mainScreen(), 86400) -- 24 hours
+  hs.alert.show("Recording started", bottomStyle)
 end
 
 local function stopRecording()
   print("🛑 stopRecording() called")
+
+  -- Dismiss persistent recording alert
+  if recordingAlert then
+    hs.alert.closeSpecific(recordingAlert)
+    recordingAlert = nil
+  end
+
   if recordingTask and recordingTask:isRunning() then
     local pid = recordingTask:pid()
     print("🛑 Found running task with PID: " .. tostring(pid))
@@ -156,11 +174,11 @@ local function stopRecording()
     print("🛑 No recording task running or not running")
   end
   recordingTask = nil
-  hs.alert.show("Recording ended")
+  hs.alert.show("Recording ended", bottomStyle)
 
   if lastOutputFile then
-    print("🛑 Will check file in 2.0 seconds: " .. lastOutputFile)
-    hs.timer.doAfter(2.0, function()
+    print("🛑 Will check file in 0.2 seconds: " .. lastOutputFile)
+    hs.timer.doAfter(0.2, function()
       local attrs = hs.fs.attributes(lastOutputFile)
       if attrs then
         print("🛑 File exists, size: " .. (attrs.size or 0) .. " bytes")
