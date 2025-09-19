@@ -83,6 +83,10 @@ local function runTranscription(path)
   hs.alert.show("Transcribing…")
   local cmd = string.format("%q run --no-project %q --api-key %q %q", uvPath, transcribeScript, apiKey, path)
   hs.task.new("/bin/bash", function(exitCode, stdOut, stdErr)
+    print("📝 Transcription completed with exit code: " .. tostring(exitCode))
+    print("📝 Transcription stdout: " .. (stdOut or "(empty)"))
+    print("📝 Transcription stderr: " .. (stdErr or "(empty)"))
+
     if exitCode == 0 then
       hs.alert.show("Copied to clipboard")
       if autoPasteAfterCopy then
@@ -91,9 +95,9 @@ local function runTranscription(path)
         end)
       end
     else
-      print("Transcription failed with exit code: " .. tostring(exitCode))
+      print("📝 Transcription failed with exit code: " .. tostring(exitCode))
       if stdErr and #stdErr > 0 then
-        print("Error details: " .. stdErr)
+        print("📝 Error details: " .. stdErr)
       end
       hs.alert.show("Transcription failed")
     end
@@ -134,33 +138,51 @@ local function startRecording()
 end
 
 local function stopRecording()
+  print("🛑 stopRecording() called")
   if recordingTask and recordingTask:isRunning() then
     local pid = recordingTask:pid()
-    print("Stopping ffmpeg with PID: " .. tostring(pid))
+    print("🛑 Found running task with PID: " .. tostring(pid))
     if pid then
-      hs.task.new("/bin/kill", function() end, {"-INT", tostring(pid)}):start()
-    else
-      recordingTask:terminate()
+      print("🛑 Sending SIGINT to allow graceful shutdown: " .. tostring(pid))
+      hs.execute("kill -INT " .. tostring(pid))
+      -- Wait a moment, then force kill if still running
+      hs.timer.doAfter(1.0, function()
+        hs.execute("kill -KILL " .. tostring(pid) .. " 2>/dev/null || true")
+        print("🛑 Backup SIGKILL sent")
+      end)
     end
+    recordingTask:terminate()
+  else
+    print("🛑 No recording task running or not running")
   end
   recordingTask = nil
   hs.alert.show("Recording ended")
 
   if lastOutputFile then
-    hs.timer.doAfter(0.5, function()
-      if hs.fs.attributes(lastOutputFile) then
+    print("🛑 Will check file in 2.0 seconds: " .. lastOutputFile)
+    hs.timer.doAfter(2.0, function()
+      local attrs = hs.fs.attributes(lastOutputFile)
+      if attrs then
+        print("🛑 File exists, size: " .. (attrs.size or 0) .. " bytes")
         runTranscription(lastOutputFile)
+      else
+        print("🛑 File does not exist!")
       end
     end)
+  else
+    print("🛑 No lastOutputFile set")
   end
 end
 
 local function toggleRecording()
+  print("🔄 toggleRecording() called")
   if recordingTask and recordingTask:isRunning() then
+    print("🔄 Task is running, calling stopRecording()")
     stopRecording()
   else
+    print("🔄 No task running, calling startRecording()")
     startRecording()
   end
 end
 
-hs.hotkey.bind({"cmd","shift"}, "x", toggleRecording)
+hs.hotkey.bind({"cmd","shift"}, "m", toggleRecording)
