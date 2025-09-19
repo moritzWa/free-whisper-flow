@@ -73,7 +73,7 @@ local function readEnvVarFromFile(filePath, key)
   return nil
 end
 
-local function runTranscription(path)
+local function runTranscriptionStream(task)
   if not hs.fs.attributes(transcribeScript) then
     print("Transcription script not found: " .. transcribeScript)
     return
@@ -89,13 +89,13 @@ local function runTranscription(path)
   end
 
   hs.alert.show("Transcribing…", bottomStyle)
-  local cmd = string.format("%q run --no-project %q --api-key %q %q", uvPath, transcribeScript, apiKey, path)
-  hs.task.new("/bin/bash", function(exitCode, stdOut, stdErr)
+
+  task:setCallback(function(exitCode, stdOut, stdErr)
     print("📝 Transcription completed with exit code: " .. tostring(exitCode))
     print("📝 Transcription stdout: " .. (stdOut or "(empty)"))
     print("📝 Transcription stderr: " .. (stdErr or "(empty)"))
 
-    if exitCode == 0 then
+    if exitCode == 0 and stdOut and #stdOut > 0 then
       hs.alert.show("Copied to clipboard", bottomStyle)
       if autoPasteAfterCopy then
         hs.timer.doAfter(0.05, function()
@@ -109,7 +109,8 @@ local function runTranscription(path)
       end
       hs.alert.show("Transcription failed", bottomStyle)
     end
-  end, {"-lc", cmd}):start()
+  end)
+  task:start()
 end
 
 local function getDefaultMicrophone()
@@ -129,19 +130,26 @@ local function startRecording()
   microphoneDevice = getDefaultMicrophone()
 
   hs.fs.mkdir(recordingsDirectory)
-  local timestamp = os.date("%Y-%m-%d_%H-%M-%S")
-  local outFile = string.format("%s/audio-%s.%s", recordingsDirectory, timestamp, fileExtension)
-  lastOutputFile = outFile
 
-  local cmd = string.format([[%s -hide_banner -loglevel error \
+  -- Note: We no longer save a file, but ffmpeg might need a dummy path in some configs.
+  -- The important part is piping to stdout with '-'.
+
+  local ffmpegCmd = string.format([[%s -hide_banner -loglevel error \
     -f avfoundation -i "%s" \
-    -ar %d -c:a aac -b:a %s "%s"]],
-    ffmpegPath, microphoneDevice, audioSampleRate, audioBitrate, outFile)
+    -ar %d -ac 1 -c:a pcm_s16le -f s16le -]],
+    ffmpegPath, microphoneDevice, audioSampleRate)
+
+  local pythonCmd = string.format("%q run --no-project %q --api-key %q", uvPath, transcribeScript, readEnvVarFromFile(envFilePath, "DEEPGRAM_API_KEY"))
+
+  local fullCmd = ffmpegCmd .. " | " .. pythonCmd
 
   print("Using microphone device: " .. microphoneDevice .. " for recording")
+  print("Executing streaming command: " .. fullCmd)
 
-  recordingTask = hs.task.new("/bin/bash", function() end, {"-lc", cmd})
-  recordingTask:start()
+
+  recordingTask = hs.task.new("/bin/bash", nil, {"-lc", fullCmd})
+  runTranscriptionStream(recordingTask)
+
 
   -- Show persistent recording indicator
   recordingAlert = hs.alert.show("🔴 Recording... (Cmd+Shift+M to stop)", bottomStyle, hs.screen.mainScreen(), 86400) -- 24 hours
@@ -159,37 +167,26 @@ local function stopRecording()
 
   if recordingTask and recordingTask:isRunning() then
     local pid = recordingTask:pid()
-    print("🛑 Found running task with PID: " .. tostring(pid))
+    print("🛑 Found parent task with PID: " .. tostring(pid))
     if pid then
-      print("🛑 Sending SIGINT to allow graceful shutdown: " .. tostring(pid))
-      hs.execute("kill -INT " .. tostring(pid))
-      -- Wait a moment, then force kill if still running
-      hs.timer.doAfter(1.0, function()
-        hs.execute("kill -KILL " .. tostring(pid) .. " 2>/dev/null || true")
-        print("🛑 Backup SIGKILL sent")
-      end)
+      -- Find the ffmpeg process which is a child of our task's shell and kill it.
+      -- This allows the python script to finish gracefully.
+      local pgrep_cmd = "pgrep -P " .. tostring(pid) .. " ffmpeg"
+      local ffmpeg_pid_str = hs.execute(pgrep_cmd):gsub("[\n\r]", "")
+      if ffmpeg_pid_str and ffmpeg_pid_str ~= "" then
+          print("🛑 Found ffmpeg child PID: " .. ffmpeg_pid_str .. ". Sending SIGINT.")
+          hs.execute("kill -INT " .. ffmpeg_pid_str)
+      else
+          print("🛑 Could not find ffmpeg child PID. Killing process group as fallback.")
+          hs.execute("kill -INT -" .. tostring(pid)) -- Fallback
+      end
     end
-    recordingTask:terminate()
+    -- The main task will terminate automatically when the pipe closes
   else
     print("🛑 No recording task running or not running")
   end
   recordingTask = nil
   hs.alert.show("Recording ended", bottomStyle)
-
-  if lastOutputFile then
-    print("🛑 Will check file in 0.2 seconds: " .. lastOutputFile)
-    hs.timer.doAfter(0.2, function()
-      local attrs = hs.fs.attributes(lastOutputFile)
-      if attrs then
-        print("🛑 File exists, size: " .. (attrs.size or 0) .. " bytes")
-        runTranscription(lastOutputFile)
-      else
-        print("🛑 File does not exist!")
-      end
-    end)
-  else
-    print("🛑 No lastOutputFile set")
-  end
 end
 
 local function toggleRecording()
