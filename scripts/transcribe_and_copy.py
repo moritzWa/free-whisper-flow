@@ -37,6 +37,8 @@ async def transcribe_stream(api_key: str) -> str:
     )
 
     final_transcript_parts = []
+    has_started_transcribing = False
+    warning_sent = False
 
     ssl_context = ssl.create_default_context(cafile=certifi.where())
 
@@ -61,22 +63,21 @@ async def transcribe_stream(api_key: str) -> str:
                 print(f"Error in sender: {e}", file=sys.stderr)
             print("Sender finished.", file=sys.stderr)
 
-        async def receiver(ws):
+        async def receiver(ws, monitor_task: asyncio.Task):
             """Receive and process transcripts from the websocket."""
-            nonlocal final_transcript_parts
+            nonlocal final_transcript_parts, has_started_transcribing
             try:
-                async for msg_str in ws:
-                    msg = json.loads(msg_str)
-                    if msg.get("type") == "SpeechFinal":
-                         # The old API used this, new one uses is_final. Keeping for some compatibility.
-                        transcript = (
-                            msg.get("channel", {})
-                            .get("alternatives", [{}])[0]
-                            .get("transcript", "")
-                        )
-                        if transcript:
-                           final_transcript_parts.append(transcript)
-                    elif msg.get("is_final"):
+                async for message_string in ws:
+                    msg = json.loads(message_string)
+                    if not has_started_transcribing:
+                        # Check for any transcript, even a partial one, to confirm audio is flowing
+                        transcript_segment = msg.get("channel", {}).get("alternatives", [{}])[0].get("transcript", "")
+                        if transcript_segment:
+                            has_started_transcribing = True
+                            # Cancel the monitor task as soon as we know it's working
+                            monitor_task.cancel()
+
+                    if msg.get("is_final"):
                         transcript = (
                             msg.get("channel", {})
                             .get("alternatives", [{}])[0]
@@ -89,7 +90,30 @@ async def transcribe_stream(api_key: str) -> str:
                 print(f"Error in receiver: {e}", file=sys.stderr)
             print("Receiver finished.", file=sys.stderr)
 
-        await asyncio.gather(sender(ws), receiver(ws))
+        async def monitor_transcription():
+            """Check if transcription has started and show a warning if not."""
+            try:
+                nonlocal has_started_transcribing, warning_sent
+                await asyncio.sleep(10)  # Wait for 10 seconds
+                if not has_started_transcribing and not warning_sent:
+                    warning_sent = True
+                    print("No transcript received after 10s, sending alert.", file=sys.stderr)
+                    # Use hs cli to show a native macOS alert
+                    alert_cmd = 'hs -c "hs.alert.show(\'No audio detected. Check microphone.\')"'
+                    os.system(alert_cmd)
+            except asyncio.CancelledError:
+                # This is expected if the task is cancelled, just ignore.
+                pass
+
+
+        monitor_task = asyncio.create_task(monitor_transcription())
+
+        try:
+            await asyncio.gather(sender(ws), receiver(ws, monitor_task))
+        finally:
+            # Ensure the monitor is always cancelled when we exit
+            monitor_task.cancel()
+
 
     return " ".join(final_transcript_parts)
 

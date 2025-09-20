@@ -26,6 +26,9 @@ bottomStyle.atScreenEdge = 2
 -- Test alert to verify bottom positioning
 hs.alert.show("Config loaded - alerts at bottom", bottomStyle, 3)
 
+-- Ensure Hammerspoon CLI tool is installed for IPC
+hs.ipc.cliInstall()
+
 -- Internal state
 local recordingTask = nil
 local lastOutputFile = nil
