@@ -1,27 +1,24 @@
 #!/usr/bin/env node
+"use strict";
+import { execSync } from "child_process";
+import path from "path";
+import { fileURLToPath } from "url";
 
-const { execSync } = require('child_process');
-const path = require('path');
-const os = require('os');
-
-// Check if running on macOS
-if (os.platform() !== 'darwin') {
-  console.error('❌ whisper-clipboard-cli currently only supports macOS');
-  console.error('   Open to PRs for Windows/Linux support!');
+// Simple check for macOS
+if (process.platform !== "darwin") {
+  console.error("❌ free-whisper-flow currently only supports macOS");
   process.exit(1);
 }
 
-console.log('🎙️  Whisper Clipboard CLI - Installer');
-console.log('=====================================');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const installScriptPath = path.join(__dirname, "install.sh");
+
+console.log("🚀 Running the free-whisper-flow installer...");
 
 try {
-  // Run the install script
-  const installScript = path.join(__dirname, 'install.sh');
-  execSync(`chmod +x "${installScript}" && "${installScript}"`, {
-    stdio: 'inherit',
-    cwd: __dirname
-  });
+  execSync(`bash "${installScriptPath}"`, { stdio: "inherit" });
 } catch (error) {
-  console.error('❌ Installation failed:', error.message);
+  console.error("💀 Installation failed.");
   process.exit(1);
 }

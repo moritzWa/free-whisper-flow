@@ -1,11 +1,11 @@
--- Cmd–Shift–X: record microphone audio
+-- Cmd–Shift–M: record microphone audio
 -- After stopping: transcribe with Deepgram → copy transcript to clipboard → optional auto-paste
 
 -- Configurable paths
 local homeDirectory = os.getenv("HOME")
 local recordingsDirectory = homeDirectory .. "/Recordings"
-local transcribeScript = homeDirectory .. "/.hammerspoon/whisper-clipboard-cli/scripts/transcribe_and_copy.py"
-local envFilePath = homeDirectory .. "/.hammerspoon/whisper-clipboard-cli/.env"
+local transcribeScript = homeDirectory .. "/.hammerspoon/free-whisper-flow/scripts/transcribe_and_copy.py"
+local envFilePath = homeDirectory .. "/.hammerspoon/free-whisper-flow/.env"
 local uvPath = "/opt/homebrew/bin/uv" -- adjust if uv is elsewhere
 
 -- Behavior
@@ -87,7 +87,7 @@ local function runTranscriptionStream(task)
   end
   local apiKey = readEnvVarFromFile(envFilePath, "DEEPGRAM_API_KEY")
   if not apiKey or apiKey == "" then
-    hs.alert.show("Set DEEPGRAM_API_KEY in ~/.hammerspoon/whisper-clipboard-cli/.env", bottomStyle)
+    hs.alert.show("Set DEEPGRAM_API_KEY in ~/.hammerspoon/free-whisper-flow/.env", bottomStyle)
     return
   end
 

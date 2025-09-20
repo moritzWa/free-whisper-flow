@@ -1,65 +1,55 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
+set -e
 
-# Post-install script: copies Hammerspoon config & scripts into ~/.hammerspoon/whisper-clipboard-cli
-# and reloads Hammerspoon. Also prepares a .env placeholder if missing.
+# Post-install script: copies Hammerspoon config & scripts into ~/.hammerspoon/free-whisper-flow
 
-PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-TARGET_DIR="$HOME/.hammerspoon/whisper-clipboard-cli"
+echo "🚀 Starting free-whisper-flow post-install..."
 
-mkdir -p "$TARGET_DIR/scripts"
-
-# Handle ~/.hammerspoon/init.lua setup
+TARGET_DIR="$HOME/.hammerspoon/free-whisper-flow"
 HAMMERSPOON_INIT="$HOME/.hammerspoon/init.lua"
-WHISPER_SECTION_START="-- === whisper-clipboard-cli START ==="
-WHISPER_SECTION_END="-- === whisper-clipboard-cli END ==="
 
-mkdir -p "$HOME/.hammerspoon"
+# Define the section to be managed in init.lua
+WHISPER_SECTION_START="-- === free-whisper-flow START ==="
+WHISPER_SECTION_END="-- === free-whisper-flow END ==="
 
-# Check if we already have our loader section
-if [[ -f "${HAMMERSPOON_INIT}" ]] && grep -F "whisper-clipboard-cli START" "${HAMMERSPOON_INIT}" > /dev/null 2>&1; then
-  echo "Found existing whisper-clipboard-cli section in ~/.hammerspoon/init.lua; cleaning it up."
-  # Remove all whisper sections
-  sed '/whisper-clipboard-cli START/,/whisper-clipboard-cli END/d' "${HAMMERSPOON_INIT}" > "${HAMMERSPOON_INIT}.tmp"
+# 1. Clean up old installation section if it exists
+if [[ -f "${HAMMERSPOON_INIT}" ]] && grep -F "free-whisper-flow START" "${HAMMERSPOON_INIT}" > /dev/null 2>&1; then
+  echo "Found existing free-whisper-flow section in ~/.hammerspoon/init.lua; cleaning it up."
+  # Use sed to delete the block between the start and end markers
+  sed '/free-whisper-flow START/,/free-whisper-flow END/d' "${HAMMERSPOON_INIT}" > "${HAMMERSPOON_INIT}.tmp"
   mv "${HAMMERSPOON_INIT}.tmp" "${HAMMERSPOON_INIT}"
 fi
 
-echo "Adding whisper-clipboard-cli loader to ~/.hammerspoon/init.lua"
-NEED_LOADER=true
-
-# Copy our Hammerspoon config and scripts
-cp -f "${PROJECT_DIR}/hammerspoon/init.lua" "${TARGET_DIR}/init.lua"
-cp -f "${PROJECT_DIR}/scripts/transcribe_and_copy.py" "${TARGET_DIR}/scripts/transcribe_and_copy.py"
-chmod +x "${TARGET_DIR}/scripts/transcribe_and_copy.py"
-
-# Create .env if missing
-if [[ ! -f "${TARGET_DIR}/.env" ]]; then
-  cp -n "${PROJECT_DIR}/.env.example" "${TARGET_DIR}/.env" || true
-  echo "Created ${TARGET_DIR}/.env (fill in DEEPGRAM_API_KEY)"
-fi
-
-# Clean up old whisper-clipboard config from main init.lua if present
-if [[ -f "${HAMMERSPOON_INIT}" ]] && grep -F "record microphone audio" "${HAMMERSPOON_INIT}" > /dev/null 2>&1; then
-  echo "Removing old whisper-clipboard config from ~/.hammerspoon/init.lua"
-  # Create backup
-  cp "${HAMMERSPOON_INIT}" "${HAMMERSPOON_INIT}.backup"
-  # Remove everything from the first whisper comment to the end
-  sed '/record microphone audio/,$d' "${HAMMERSPOON_INIT}" > "${HAMMERSPOON_INIT}.tmp"
-  mv "${HAMMERSPOON_INIT}.tmp" "${HAMMERSPOON_INIT}"
-fi
-
-# Add our loader section if needed
-if [[ "${NEED_LOADER}" == "true" ]]; then
-  cat >> "${HAMMERSPOON_INIT}" <<LUA
+# 2. Append the new loader section to init.lua
+echo "Adding free-whisper-flow loader to ~/.hammerspoon/init.lua"
+cat >> "${HAMMERSPOON_INIT}" << EOF
 
 ${WHISPER_SECTION_START}
--- Load whisper-clipboard-cli config if present
-local whisper_cfg = os.getenv("HOME") .. "/.hammerspoon/whisper-clipboard-cli/init.lua"
+-- Load free-whisper-flow config if present
+local whisper_cfg = os.getenv("HOME") .. "/.hammerspoon/free-whisper-flow/init.lua"
 if hs.fs.attributes(whisper_cfg) then
-  dofile(whisper_cfg)
+    dofile(whisper_cfg)
+    print("✅ Loaded free-whisper-flow config")
+else
+    print(" M issing free-whisper-flow config at: " .. whisper_cfg)
 end
 ${WHISPER_SECTION_END}
-LUA
+EOF
+
+# 3. Recreate the target directory and copy files
+echo "Creating directory ${TARGET_DIR}"
+rm -rf "${TARGET_DIR}"
+mkdir -p "${TARGET_DIR}/scripts"
+
+echo "Copying scripts..."
+# Copy the Lua entrypoint and the Python script
+cp ./hammerspoon/init.lua "${TARGET_DIR}/init.lua"
+cp ./scripts/transcribe_and_copy.py "${TARGET_DIR}/scripts/transcribe_and_copy.py"
+
+# If a .env file exists, copy it too
+if [ -f "./.env" ]; then
+    echo "Copying .env file..."
+    cp ./.env "${TARGET_DIR}/.env"
 fi
 
 # Reload Hammerspoon if running

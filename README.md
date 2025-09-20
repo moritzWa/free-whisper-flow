@@ -1,8 +1,6 @@
-## Free Whisper Flow
+## free-whisper-flow
 
 **Own your transcription workflow.** Press **Cmd+Shift+M**, speak, and get the transcript in your clipboard the moment you stop. This tool uses real-time audio streaming for near-instant results. It's hackable, with zero vendor lock-in, using free Deepgram credits that last forever.
-
-(Free alternative to [SuperWhisper](https://superwhisper.com), [With Aqua](https://withaqua.com/), [Wisper Flow](https://wisprflow.ai), etc)
 
 ![Demo](demo.gif)
 
@@ -11,7 +9,7 @@
 Clone this repository and run the installer:
 
 ```bash
-git clone httpshttps://github.com/moritzWa/free-whisper-flow.git # Please replace with the actual repo URL
+git clone https://github.com/your-username/free-whisper-flow.git
 cd free-whisper-flow
 ./install.sh
 ```

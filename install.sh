@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Interactive installer for whisper-clipboard-cli
-# Makes the entire setup process braindead simple
+# Interactive installer for free-whisper-flow
+# - Checks and installs Homebrew, ffmpeg, Hammerspoon, uv
+# - Sets up ~/.hammerspoon/free-whisper-flow directory
+# - Prompts for Deepgram API key and creates .env file
+# - Configures Hammerspoon's init.lua to load the script
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-TARGET_DIR="$HOME/.hammerspoon/whisper-clipboard-cli"
+TARGET_DIR="$HOME/.hammerspoon/free-whisper-flow"
 HAMMERSPOON_INIT="$HOME/.hammerspoon/init.lua"
 
-echo "🎙️  Whisper Clipboard CLI - Interactive Installer"
+echo "🎙️  free-whisper-flow - Interactive Installer"
 echo "=================================================="
 echo
 
@@ -150,50 +153,60 @@ if [[ -d "$TARGET_DIR" ]]; then
     fi
 fi
 
-# Install files
-echo "📦 Installing files..."
+# Install files by creating symlinks for development
+echo "📦 Linking files for development..."
 mkdir -p "${TARGET_DIR}/scripts"
 
-# Copy Hammerspoon script
-echo "Installing Hammerspoon configuration..."
-cp "${PROJECT_DIR}/hammerspoon/init.lua" "${TARGET_DIR}/init.lua"
+# Link Hammerspoon script
+echo "Linking Hammerspoon configuration..."
+ln -sf "$PROJECT_DIR/hammerspoon/init.lua" "$TARGET_DIR/init.lua"
 
-# Copy transcription script
-cp "${PROJECT_DIR}/scripts/transcribe_and_copy.py" "${TARGET_DIR}/scripts/"
-chmod +x "${TARGET_DIR}/scripts/transcribe_and_copy.py"
+# Link transcription script
+ln -sf "$PROJECT_DIR/scripts/transcribe_and_copy.py" "$TARGET_DIR/scripts/transcribe_and_copy.py"
 
-# Create .env file with API key
-echo "DEEPGRAM_API_KEY=${deepgram_key}" > "${TARGET_DIR}/.env"
+# Create .env file in project root and link it
+echo "DEEPGRAM_API_KEY=${deepgram_key}" > "$PROJECT_DIR/.env"
+ln -sf "$PROJECT_DIR/.env" "$TARGET_DIR/.env"
+echo "🔑 API key stored in ${PROJECT_DIR}/.env and linked."
+echo "   (Make sure to add .env to your .gitignore file)"
 
-echo "✅ Files installed to ${TARGET_DIR}"
+echo "✅ Files linked to ${TARGET_DIR}"
 
 # Setup Hammerspoon loader
 if [[ ! -f "$HAMMERSPOON_INIT" ]] || [[ ! -s "$HAMMERSPOON_INIT" ]]; then
     echo "📝 Creating Hammerspoon init.lua..."
-    mkdir -p "$(dirname "$HAMMERSPOON_INIT")"
-    cat > "$HAMMERSPOON_INIT" <<'EOF'
--- Load whisper-clipboard-cli config if present
-local cfg = os.getenv("HOME") .. "/.hammerspoon/whisper-clipboard-cli/init.lua"
+    # WORKAROUND: For an unknown reason, directly creating a file in ~/.hammerspoon
+    # via `touch` or `cat >` was failing with a "No such file or directory" error,
+    # even though the directory exists and has correct permissions.
+    # Creating a temp file and moving it with sudo bypasses this mysterious issue.
+    TMP_INIT=$(mktemp)
+    cat > "$TMP_INIT" <<'EOF'
+-- Load free-whisper-flow config if present
+local cfg = os.getenv("HOME") .. "/.hammerspoon/free-whisper-flow/init.lua"
 if hs.fs.attributes(cfg) then 
     dofile(cfg) 
-    print("Loaded whisper-clipboard-cli")
+    print("Loaded free-whisper-flow")
 end
 EOF
+    sudo mkdir -p "$(dirname "$HAMMERSPOON_INIT")"
+    sudo mv "$TMP_INIT" "$HAMMERSPOON_INIT"
 else
     echo "📝 Existing Hammerspoon init.lua found"
-    if ! grep -q "whisper-clipboard-cli" "$HAMMERSPOON_INIT"; then
-        echo "Adding whisper-clipboard-cli loader to existing init.lua..."
-        cat >> "$HAMMERSPOON_INIT" <<'EOF'
+    if ! grep -q "free-whisper-flow" "$HAMMERSPOON_INIT"; then
+        echo "Adding free-whisper-flow loader to existing init.lua..."
+        TMP_INIT=$(mktemp)
+        cat > "$TMP_INIT" <<'EOF'
 
--- Load whisper-clipboard-cli config if present
-local cfg = os.getenv("HOME") .. "/.hammerspoon/whisper-clipboard-cli/init.lua"
+-- Load free-whisper-flow config if present
+local cfg = os.getenv("HOME") .. "/.hammerspoon/free-whisper-flow/init.lua"
 if hs.fs.attributes(cfg) then 
     dofile(cfg) 
-    print("Loaded whisper-clipboard-cli")
+    print("Loaded free-whisper-flow")
 end
 EOF
+        sudo mv "$TMP_INIT" "$HAMMERSPOON_INIT"
     else
-        echo "✅ whisper-clipboard-cli already configured in init.lua"
+        echo "✅ free-whisper-flow already configured in init.lua"
     fi
 fi
 
