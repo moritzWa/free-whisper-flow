@@ -34,6 +34,18 @@ That's it. It works globally across all applications. Optional auto-paste saves 
 
 This tool uses `ffmpeg` to capture audio and streams it in real-time to a Python script. The script establishes a WebSocket connection with Deepgram's streaming transcription service. As soon as you stop recording, the final transcript is returned and copied to your clipboard. This streaming approach minimizes latency compared to traditional file-based transcription.
 
+## Development
+
+Because this project uses symlinks, any changes you make in the project files will be live once you reload the Hammerspoon configuration.
+
+The standard "Reload Config" option can be unreliable. For a guaranteed refresh, run the following command in your terminal:
+
+```bash
+killall Hammerspoon && sleep 1 && open -a Hammerspoon
+```
+
+After running the command, you should see a "Config loaded" notification, confirming that your changes have been applied.
+
 ## Requirements
 
 - **macOS**

@@ -156,7 +156,6 @@ local function startRecording()
 
   -- Show persistent recording indicator
   recordingAlert = hs.alert.show("🔴 Recording... (Cmd+Shift+M to stop)", bottomStyle, hs.screen.mainScreen(), 86400) -- 24 hours
-  hs.alert.show("Recording started", bottomStyle)
 end
 
 local function stopRecording()

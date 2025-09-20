@@ -172,47 +172,13 @@ echo "   (Make sure to add .env to your .gitignore file)"
 
 echo "✅ Files linked to ${TARGET_DIR}"
 
-# Setup Hammerspoon loader
-if [[ ! -f "$HAMMERSPOON_INIT" ]] || [[ ! -s "$HAMMERSPOON_INIT" ]]; then
-    echo "📝 Creating Hammerspoon init.lua..."
-    # WORKAROUND: For an unknown reason, directly creating a file in ~/.hammerspoon
-    # via `touch` or `cat >` was failing with a "No such file or directory" error,
-    # even though the directory exists and has correct permissions.
-    # Creating a temp file and moving it with sudo bypasses this mysterious issue.
-    TMP_INIT=$(mktemp)
-    cat > "$TMP_INIT" <<'EOF'
--- Load free-whisper-flow config if present
-local cfg = os.getenv("HOME") .. "/.hammerspoon/free-whisper-flow/init.lua"
-if hs.fs.attributes(cfg) then 
-    dofile(cfg) 
-    print("Loaded free-whisper-flow")
-end
-EOF
-    sudo mkdir -p "$(dirname "$HAMMERSPOON_INIT")"
-    sudo mv "$TMP_INIT" "$HAMMERSPOON_INIT"
-else
-    echo "📝 Existing Hammerspoon init.lua found"
-    if ! grep -q "free-whisper-flow" "$HAMMERSPOON_INIT"; then
-        echo "Adding free-whisper-flow loader to existing init.lua..."
-        TMP_INIT=$(mktemp)
-        cat > "$TMP_INIT" <<'EOF'
-
--- Load free-whisper-flow config if present
-local cfg = os.getenv("HOME") .. "/.hammerspoon/free-whisper-flow/init.lua"
-if hs.fs.attributes(cfg) then 
-    dofile(cfg) 
-    print("Loaded free-whisper-flow")
-end
-EOF
-        sudo mv "$TMP_INIT" "$HAMMERSPOON_INIT"
-    else
-        echo "✅ free-whisper-flow already configured in init.lua"
-    fi
-fi
+# Symlink the main init.lua file that Hammerspoon loads
+ln -sf "$PROJECT_DIR/hammerspoon/init.lua" "$HAMMERSPOON_INIT"
+echo "✅ Main Hammerspoon config linked."
 
 # Reload Hammerspoon
-echo "🔄 Reloading Hammerspoon..."
-open -g "hammerspoon://reload" 2>/dev/null || echo "Note: Hammerspoon may not be running yet"
+echo "🔄 Restarting Hammerspoon to apply changes..."
+killall Hammerspoon && sleep 1 && open -a Hammerspoon 2>/dev/null || echo "Note: Hammerspoon may not have been running."
 
 echo
 echo "🎉 Installation Complete!"
