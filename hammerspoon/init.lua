@@ -91,8 +91,6 @@ local function runTranscriptionStream(task)
     return
   end
 
-  hs.alert.show("Transcribing…", bottomStyle)
-
   task:setCallback(function(exitCode, stdOut, stdErr)
     print("📝 Transcription completed with exit code: " .. tostring(exitCode))
     print("📝 Transcription stdout: " .. (stdOut or "(empty)"))
@@ -155,7 +153,7 @@ local function startRecording()
 
 
   -- Show persistent recording indicator
-  recordingAlert = hs.alert.show("🔴 Recording... (Cmd+Shift+M to stop)", bottomStyle, hs.screen.mainScreen(), 86400) -- 24 hours
+  recordingAlert = hs.alert.show("🔴 Transcribing... (Cmd+Shift+M to stop)", bottomStyle, hs.screen.mainScreen(), 86400) -- 24 hours
 end
 
 local function stopRecording()
@@ -188,7 +186,6 @@ local function stopRecording()
     print("🛑 No recording task running or not running")
   end
   recordingTask = nil
-  hs.alert.show("Recording ended", bottomStyle)
 end
 
 local function toggleRecording()
