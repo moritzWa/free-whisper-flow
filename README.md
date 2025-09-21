@@ -27,6 +27,7 @@ The installer will:
 2. Speak.
 3. Press **Cmd+Shift+M** again to stop.
 4. The transcript is now in your clipboard.
+5. Optionally press escape to cancel the recording.
 
 That's it. It works globally across all applications. Optional auto-paste saves you the Cmd+V.
 
