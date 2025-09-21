@@ -33,6 +33,8 @@ hs.ipc.cliInstall()
 local recordingTask = nil
 local lastOutputFile = nil
 local recordingAlert = nil
+local recordingModal = nil
+local wasCancelled = false
 
 -- Find ffmpeg in common locations and via a login shell
 local function findFFmpeg()
@@ -92,6 +94,11 @@ local function runTranscriptionStream(task)
   end
 
   task:setCallback(function(exitCode, stdOut, stdErr)
+    -- If the cancellation flag is set, do nothing.
+    if wasCancelled then
+        print("📝 Task callback ignored due to cancellation.")
+        return
+    end
     print("📝 Transcription completed with exit code: " .. tostring(exitCode))
     print("📝 Transcription stdout: " .. (stdOut or "(empty)"))
     print("📝 Transcription stderr: " .. (stdErr or "(empty)"))
@@ -148,16 +155,23 @@ local function startRecording()
   print("Executing streaming command: " .. fullCmd)
 
 
+  wasCancelled = false -- Reset the flag each time we start
   recordingTask = hs.task.new("/bin/bash", nil, {"-lc", fullCmd})
   runTranscriptionStream(recordingTask)
 
 
   -- Show persistent recording indicator
   recordingAlert = hs.alert.show("🔴 Transcribing... (Cmd+Shift+M to stop)", bottomStyle, hs.screen.mainScreen(), 86400) -- 24 hours
+
+  -- Enter the modal to capture the escape key
+  recordingModal:enter()
 end
 
 local function stopRecording()
   print("🛑 stopRecording() called")
+
+  -- Exit the modal so the escape key is released
+  recordingModal:exit()
 
   -- Dismiss persistent recording alert
   if recordingAlert then
@@ -188,6 +202,26 @@ local function stopRecording()
   recordingTask = nil
 end
 
+local function cancelRecording()
+  print("🚫 Cancelling recording via Escape key.")
+
+  wasCancelled = true
+
+  if recordingAlert then
+    hs.alert.closeSpecific(recordingAlert)
+    recordingAlert = nil
+  end
+
+  if recordingTask and recordingTask:isRunning() then
+    recordingTask:terminate()
+  end
+  recordingTask = nil
+
+  hs.alert.show("Cancelled", bottomStyle, 2)
+
+  recordingModal:exit()
+end
+
 local function toggleRecording()
   print("🔄 toggleRecording() called")
   if recordingTask and recordingTask:isRunning() then
@@ -198,5 +232,10 @@ local function toggleRecording()
     startRecording()
   end
 end
+
+recordingModal = hs.hotkey.modal.new()
+recordingModal:bind({}, "escape", function()
+    cancelRecording()
+end)
 
 hs.hotkey.bind({"cmd","shift"}, "m", toggleRecording)
