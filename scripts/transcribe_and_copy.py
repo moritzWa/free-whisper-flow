@@ -33,7 +33,7 @@ def read_api_key(cli_key: Optional[str]) -> str:
 async def transcribe_stream(api_key: str) -> str:
     uri = (
         f"{DEEGRAM_API_URL}?model=nova-2&smart_format=true"
-        "&encoding=linear16&sample_rate=48000"
+        "&encoding=linear16&sample_rate=16000"
     )
 
     final_transcript_parts = []

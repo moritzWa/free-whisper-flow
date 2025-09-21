@@ -92,6 +92,19 @@ else
     echo "✅ uv found"
 fi
 
+# Check for gdate (for benchmarking)
+if ! command_exists gdate; then
+    echo "❌ gdate not found (part of coreutils)"
+    if ask_yes_no "Install coreutils via Homebrew?" "y"; then
+        echo "Installing coreutils..."
+        brew install coreutils
+    else
+        echo "⚠️  Warning: gdate is required for the benchmark.sh script."
+    fi
+else
+    echo "✅ gdate found"
+fi
+
 # Check Hammerspoon
 if ! brew list --cask hammerspoon &>/dev/null && ! [[ -d "/Applications/Hammerspoon.app" ]]; then
     echo "❌ Hammerspoon not found"

@@ -12,8 +12,8 @@ local uvPath = "/opt/homebrew/bin/uv" -- adjust if uv is elsewhere
 local autoPasteAfterCopy = true
 
 -- Audio settings
-local audioSampleRate = 48000
-local audioBitrate = "192k"
+local audioSampleRate = 16000 -- Reduced for efficiency
+local audioBitrate = "256k"    -- Bitrate for pcm_s16le
 local fileExtension = "m4a" -- change to "wav" if desired
 
 -- avfoundation device indices (auto-detected dynamically)
