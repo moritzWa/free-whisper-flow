@@ -193,6 +193,29 @@ echo "✅ Main Hammerspoon config linked."
 echo "🔄 Restarting Hammerspoon to apply changes..."
 killall Hammerspoon && sleep 1 && open -a Hammerspoon 2>/dev/null || echo "Note: Hammerspoon may not have been running."
 
+# Add Hammerspoon to login items
+echo
+echo "⚙️  Setting up automatic startup..."
+echo "📋 Note: Hammerspoon must be running for free-whisper-flow to work."
+if ask_yes_no "Add Hammerspoon to login items so it starts automatically?" "y"; then
+    # Check if Hammerspoon is already in login items
+    if ! osascript -e 'tell application "System Events" to get the name of every login item' 2>/dev/null | grep -q "Hammerspoon"; then
+        echo "Adding Hammerspoon to login items..."
+        if osascript -e 'tell application "System Events" to make login item at end with properties {path:"/Applications/Hammerspoon.app", hidden:false}' 2>/dev/null; then
+            echo "✅ Hammerspoon will now start automatically when you log in"
+        else
+            echo "⚠️  Could not automatically add Hammerspoon to login items."
+            echo "   You can manually enable this in Hammerspoon > Preferences > Launch Hammerspoon at login"
+        fi
+    else
+        echo "✅ Hammerspoon is already in login items"
+    fi
+else
+    echo "⚠️  Skipped adding to login items."
+    echo "   Remember: You'll need to manually start Hammerspoon each time you restart your computer."
+    echo "   You can enable auto-start later in Hammerspoon Preferences."
+fi
+
 echo
 echo "🎉 Installation Complete!"
 echo "===================="
@@ -201,7 +224,6 @@ echo "Next steps:"
 echo "1. If Hammerspoon isn't running, open it from Applications"
 echo "2. Grant Accessibility permissions when prompted"
 echo "3. Grant Microphone permissions when you first record"
-echo "4. Enable 'Launch Hammerspoon at login' in Hammerspoon Preferences"
 echo
 echo "Usage:"
 echo "• Press Cmd+Shift+X to start/stop recording"

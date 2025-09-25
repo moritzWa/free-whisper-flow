@@ -20,6 +20,7 @@ The installer will:
 - 🎤 Use your system's default microphone
 - 🔑 Prompt for your Deepgram API key
 - 📦 Set up the Hammerspoon configuration automatically
+- 🚀 Optionally add Hammerspoon to login items for automatic startup
 
 ## Usage
 
@@ -66,4 +67,4 @@ You will be prompted to grant permissions for:
 - **Accessibility**: Hammerspoon needs this for global hotkeys.
 - **Microphone**: macOS will ask on the first recording attempt.
 
-We recommend enabling "Launch Hammerspoon at login" for convenience.
+The installer will offer to automatically add Hammerspoon to your login items so it starts when you log in. This is recommended since Hammerspoon must be running for free-whisper-flow to work.
