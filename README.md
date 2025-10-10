@@ -1,6 +1,6 @@
 ## free-whisper-flow
 
-Free version of: Whisper Flow, Aqua Voice, Willow Voice, SuperWhisper MacWhisper
+Free version of: Whisper Flow, Aqua Voice, Willow Voice, SuperWhisper, MacWhisper
 
 Type faster by using your voice—for free. Press **Cmd+Shift+M**, speak, and get the transcript in your clipboard the moment you stop. This tool uses real-time audio streaming for near-instant results. It's hackable, with zero vendor lock-in, using free Deepgram credits that last forever.
 
