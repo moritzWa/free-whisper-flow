@@ -2,7 +2,7 @@
 
 Type faster by using your voice—for free. Press **Cmd+Shift+M**, speak, and get the transcript in your clipboard the moment you stop. This tool uses real-time audio streaming for near-instant results. It's hackable, with zero vendor lock-in, using free Deepgram credits that last forever.
 
-![Demo](demo.gif)
+https://github.com/user-attachments/assets/3c51bfbc-3645-4828-95f0-d75fc8b34838
 
 ## 🚀 Installation
 
