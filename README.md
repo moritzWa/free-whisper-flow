@@ -1,5 +1,7 @@
 ## free-whisper-flow
 
+Free version of: Whisper Flow, Aqua Voice, Willow Voice, SuperWhisper MacWhisper
+
 Type faster by using your voice—for free. Press **Cmd+Shift+M**, speak, and get the transcript in your clipboard the moment you stop. This tool uses real-time audio streaming for near-instant results. It's hackable, with zero vendor lock-in, using free Deepgram credits that last forever.
 
 https://github.com/user-attachments/assets/3c51bfbc-3645-4828-95f0-d75fc8b34838
@@ -16,11 +18,9 @@ cd free-whisper-flow
 
 The installer will:
 
-- ✅ Install required dependencies (Homebrew, ffmpeg, Hammerspoon, uv)
-- 🎤 Use your system's default microphone
-- 🔑 Prompt for your Deepgram API key
-- 📦 Set up the Hammerspoon configuration automatically
-- 🚀 Optionally add Hammerspoon to login items for automatic startup
+- ✅ Install dependencies (Homebrew, ffmpeg, Hammerspoon, uv)
+- 🎤 Configure your microphone, Deepgram API key, and Hammerspoon
+- 🚀 Optionally add Hammerspoon to login items for auto-startup
 
 ## Usage
 
@@ -53,13 +53,6 @@ After running the command, you should see a "Config loaded" notification, confir
 - **macOS**
 - A [Deepgram API key](https://deepgram.com) (comes with $200 in free credits).
 
-The installer will automatically handle:
-
-- [Homebrew](https://brew.sh): Package manager for macOS.
-- [ffmpeg](https://ffmpeg.org): For real-time audio capture.
-- [Hammerspoon](https://hammerspoon.org): For global hotkey management.
-- [uv](https://docs.astral.sh/uv/): A fast Python installer and runner.
-
 ## Permissions
 
 You will be prompted to grant permissions for:
@@ -67,4 +60,4 @@ You will be prompted to grant permissions for:
 - **Accessibility**: Hammerspoon needs this for global hotkeys.
 - **Microphone**: macOS will ask on the first recording attempt.
 
-The installer will offer to automatically add Hammerspoon to your login items so it starts when you log in. This is recommended since Hammerspoon must be running for free-whisper-flow to work.
+The installer offers to add Hammerspoon to login items, which is recommended so it's always running.
