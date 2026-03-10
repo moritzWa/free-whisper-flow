@@ -32,6 +32,28 @@ The installer will:
 
 That's it. It works globally across all applications. Optional auto-paste saves you the Cmd+V.
 
+## Microphone Selection
+
+By default, the tool uses your system's default microphone. You can configure preferred microphones and blacklist others by adding to your `.env` file:
+
+```bash
+# Comma-separated list of preferred mics (first available wins)
+MIC_PREFERENCE=BY-GM18CU,MacBook Air Microphone
+
+# Comma-separated list of mics to never use
+MIC_BLACKLIST=airpods
+```
+
+The tool checks each preferred mic in order and picks the first one that's currently connected. If none are available, it falls back to the first non-blacklisted device. To see your available devices, run:
+
+```bash
+ffmpeg -f avfoundation -list_devices true -i "" 2>&1 | grep -A 20 "audio devices"
+```
+
+## Smart Paste
+
+When you stop recording, the transcript is always copied to your clipboard. If your cursor is focused on a text input field, it will also auto-paste. Otherwise, it just copies so you can paste manually wherever you want.
+
 ## How It Works
 
 This tool uses `ffmpeg` to capture audio and streams it in real-time to a Python script. The script establishes a WebSocket connection with Deepgram's streaming transcription service. As soon as you stop recording, the final transcript is returned and copied to your clipboard. This streaming approach minimizes latency compared to traditional file-based transcription.

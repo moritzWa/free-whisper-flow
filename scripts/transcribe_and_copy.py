@@ -9,6 +9,7 @@
 
 import argparse
 import asyncio
+import base64
 import json
 import os
 import ssl
@@ -19,20 +20,25 @@ from typing import Optional
 import websockets
 import certifi
 
-DEEGRAM_API_URL = "wss://api.deepgram.com/v1/listen"
+DEEPGRAM_API_URL = "wss://api.deepgram.com/v1/listen"
+ELEVENLABS_API_URL = "wss://api.elevenlabs.io/v1/speech-to-text/realtime"
 
 
-def read_api_key(cli_key: Optional[str]) -> str:
-    key = cli_key or os.getenv("DEEPGRAM_API_KEY")
+def read_api_key(cli_key: Optional[str], provider: str) -> str:
+    if provider == "elevenlabs":
+        env_var = "ELEVENLABS_API_KEY"
+    else:
+        env_var = "DEEPGRAM_API_KEY"
+    key = cli_key or os.getenv(env_var)
     if not key:
-        print("DEEPGRAM_API_KEY not set and --api-key not provided", file=sys.stderr)
+        print(f"{env_var} not set and --api-key not provided", file=sys.stderr)
         sys.exit(2)
     return key
 
 
-async def transcribe_stream(api_key: str) -> str:
+async def transcribe_stream_deepgram(api_key: str) -> str:
     uri = (
-        f"{DEEGRAM_API_URL}?model=nova-2&smart_format=true"
+        f"{DEEPGRAM_API_URL}?model=nova-2&smart_format=true"
         "&encoding=linear16&sample_rate=16000"
     )
 
@@ -49,7 +55,6 @@ async def transcribe_stream(api_key: str) -> str:
     ) as ws:
 
         async def sender(ws):
-            """Send audio data from stdin to the websocket."""
             try:
                 while True:
                     data = await asyncio.get_event_loop().run_in_executor(
@@ -64,17 +69,14 @@ async def transcribe_stream(api_key: str) -> str:
             print("Sender finished.", file=sys.stderr)
 
         async def receiver(ws, monitor_task: asyncio.Task):
-            """Receive and process transcripts from the websocket."""
             nonlocal final_transcript_parts, has_started_transcribing
             try:
                 async for message_string in ws:
                     msg = json.loads(message_string)
                     if not has_started_transcribing:
-                        # Check for any transcript, even a partial one, to confirm audio is flowing
                         transcript_segment = msg.get("channel", {}).get("alternatives", [{}])[0].get("transcript", "")
                         if transcript_segment:
                             has_started_transcribing = True
-                            # Cancel the monitor task as soon as we know it's working
                             monitor_task.cancel()
 
                     if msg.get("is_final"):
@@ -91,29 +93,124 @@ async def transcribe_stream(api_key: str) -> str:
             print("Receiver finished.", file=sys.stderr)
 
         async def monitor_transcription():
-            """Check if transcription has started and show a warning if not."""
             try:
                 nonlocal has_started_transcribing, warning_sent
-                await asyncio.sleep(10)  # Wait for 10 seconds
+                await asyncio.sleep(10)
                 if not has_started_transcribing and not warning_sent:
                     warning_sent = True
                     print("No transcript received after 10s, sending alert.", file=sys.stderr)
-                    # Use hs cli to show a native macOS alert
                     alert_cmd = 'hs -c "hs.alert.show(\'No audio detected. Check microphone.\')"'
                     os.system(alert_cmd)
             except asyncio.CancelledError:
-                # This is expected if the task is cancelled, just ignore.
                 pass
-
 
         monitor_task = asyncio.create_task(monitor_transcription())
 
         try:
             await asyncio.gather(sender(ws), receiver(ws, monitor_task))
         finally:
-            # Ensure the monitor is always cancelled when we exit
             monitor_task.cancel()
 
+    return " ".join(final_transcript_parts)
+
+
+async def transcribe_stream_elevenlabs(api_key: str) -> str:
+    uri = (
+        f"{ELEVENLABS_API_URL}?model_id=scribe_v2_realtime"
+        "&audio_format=pcm_16000&commit_strategy=vad"
+    )
+
+    final_transcript_parts = []
+    has_started_transcribing = False
+    sender_done = asyncio.Event()
+
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+
+    async with websockets.connect(
+        uri,
+        extra_headers={"xi-api-key": api_key},
+        ssl=ssl_context,
+    ) as ws:
+
+        async def sender(ws):
+            """Stream audio from stdin, then send silence + commit to flush."""
+            try:
+                while True:
+                    data = await asyncio.get_event_loop().run_in_executor(
+                        None, sys.stdin.buffer.read, 8192
+                    )
+                    if not data:
+                        break
+                    await ws.send(json.dumps({
+                        "message_type": "input_audio_chunk",
+                        "audio_base_64": base64.b64encode(data).decode(),
+                        "commit": False,
+                        "sample_rate": 16000,
+                    }))
+                # Send 2s of silence so VAD detects end-of-speech
+                silence = b'\x00' * 64000  # 2s at 16kHz 16-bit mono
+                for i in range(0, len(silence), 8192):
+                    await ws.send(json.dumps({
+                        "message_type": "input_audio_chunk",
+                        "audio_base_64": base64.b64encode(silence[i:i+8192]).decode(),
+                        "commit": False,
+                        "sample_rate": 16000,
+                    }))
+                # Manual commit as final flush
+                await ws.send(json.dumps({
+                    "message_type": "input_audio_chunk",
+                    "audio_base_64": "",
+                    "commit": True,
+                    "sample_rate": 16000,
+                }))
+            except Exception as e:
+                print(f"Error in sender: {e}", file=sys.stderr)
+            sender_done.set()
+            print("Sender finished.", file=sys.stderr)
+
+        async def receiver(ws):
+            """Collect committed transcripts. Once sender is done and we get a
+            final commit with no more partials following, close immediately."""
+            nonlocal final_transcript_parts, has_started_transcribing
+            try:
+                while True:
+                    # Once sender is done and we've seen a commit, use short timeout
+                    # to catch any remaining messages, then exit
+                    use_short = sender_done.is_set()
+                    try:
+                        msg_str = await asyncio.wait_for(ws.recv(), timeout=0.3 if use_short else 30.0)
+                    except asyncio.TimeoutError:
+                        break
+                    msg = json.loads(msg_str)
+                    msg_type = msg.get("message_type", "")
+
+                    if not has_started_transcribing:
+                        if msg_type in ("partial_transcript", "committed_transcript"):
+                            if msg.get("text", ""):
+                                has_started_transcribing = True
+
+                    if msg_type == "committed_transcript":
+                        text = msg.get("text", "")
+                        if text:
+                            final_transcript_parts.append(text)
+            except Exception as e:
+                print(f"Error in receiver: {e}", file=sys.stderr)
+            print("Receiver finished.", file=sys.stderr)
+
+        async def monitor():
+            try:
+                await asyncio.sleep(10)
+                if not has_started_transcribing:
+                    print("No transcript received after 10s, sending alert.", file=sys.stderr)
+                    os.system('hs -c "hs.alert.show(\'No audio detected. Check microphone.\')"')
+            except asyncio.CancelledError:
+                pass
+
+        monitor_task = asyncio.create_task(monitor())
+        # Run sender and receiver concurrently so receiver collects
+        # transcripts while audio is still streaming
+        await asyncio.gather(sender(ws), receiver(ws))
+        monitor_task.cancel()
 
     return " ".join(final_transcript_parts)
 
@@ -127,16 +224,24 @@ def copy_to_clipboard(text: str) -> None:
 
 async def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Transcribe an audio stream with Deepgram and copy to clipboard"
+        description="Transcribe an audio stream and copy to clipboard"
     )
     parser.add_argument(
-        "--api-key", dest="api_key", help="Deepgram API key (or set DEEPGRAM_API_KEY)"
+        "--api-key", dest="api_key", help="API key (or set via env var)"
+    )
+    parser.add_argument(
+        "--provider", dest="provider", default="elevenlabs",
+        choices=["deepgram", "elevenlabs"],
+        help="STT provider (default: elevenlabs)"
     )
     args = parser.parse_args()
 
     try:
-        key = read_api_key(args.api_key)
-        transcript = await transcribe_stream(key)
+        key = read_api_key(args.api_key, args.provider)
+        if args.provider == "elevenlabs":
+            transcript = await transcribe_stream_elevenlabs(key)
+        else:
+            transcript = await transcribe_stream_deepgram(key)
         if not transcript:
             print("No transcript returned", file=sys.stderr)
             return 1

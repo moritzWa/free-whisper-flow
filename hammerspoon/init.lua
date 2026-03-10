@@ -8,9 +8,6 @@ local transcribeScript = homeDirectory .. "/.hammerspoon/free-whisper-flow/scrip
 local envFilePath = homeDirectory .. "/.hammerspoon/free-whisper-flow/.env"
 local uvPath = "/opt/homebrew/bin/uv" -- adjust if uv is elsewhere
 
--- Behavior
-local autoPasteAfterCopy = true
-
 -- Audio settings
 local audioSampleRate = 16000 -- Reduced for efficiency
 local audioBitrate = "256k"    -- Bitrate for pcm_s16le
@@ -18,6 +15,19 @@ local fileExtension = "m4a" -- change to "wav" if desired
 
 -- avfoundation device indices (auto-detected dynamically)
 local microphoneDevice = nil  -- Will be auto-detected
+
+-- Microphone preference and blacklist (loaded from .env, comma-separated)
+-- MIC_PREFERENCE=BY-GM18CU,MacBook Air Microphone
+-- MIC_BLACKLIST=airpods
+local function splitCsv(str)
+  local result = {}
+  if not str or str == "" then return result end
+  for item in str:gmatch("([^,]+)") do
+    item = item:gsub("^%s+", ""):gsub("%s+$", "")
+    if item ~= "" then table.insert(result, item) end
+  end
+  return result
+end
 
 -- Create custom style for bottom alerts
 local bottomStyle = {table.unpack(hs.alert.defaultStyle)}
@@ -78,6 +88,20 @@ local function readEnvVarFromFile(filePath, key)
   return nil
 end
 
+-- Load mic config from .env (falls back to system default if not set)
+local micPreference = splitCsv(readEnvVarFromFile(envFilePath, "MIC_PREFERENCE") or "")
+local micBlacklist  = splitCsv(readEnvVarFromFile(envFilePath, "MIC_BLACKLIST") or "")
+
+-- STT provider: "elevenlabs" (default) or "deepgram"
+local sttProvider = readEnvVarFromFile(envFilePath, "STT_PROVIDER") or "elevenlabs"
+print("STT provider: " .. sttProvider)
+
+-- Feedback sounds: same sound (Pop), higher pitch on start, lower on stop
+local popSoundPath = "/System/Library/Sounds/Pop.aiff"
+local function playSound(rate)
+  hs.task.new("/usr/bin/afplay", nil, {"--rate", tostring(rate), popSoundPath}):start()
+end
+
 local function runTranscriptionStream(task)
   if not hs.fs.attributes(transcribeScript) then
     print("Transcription script not found: " .. transcribeScript)
@@ -87,9 +111,10 @@ local function runTranscriptionStream(task)
     hs.alert.show("uv not found at " .. uvPath .. " - reinstall required", bottomStyle)
     return
   end
-  local apiKey = readEnvVarFromFile(envFilePath, "DEEPGRAM_API_KEY")
+  local apiKeyVar = sttProvider == "elevenlabs" and "ELEVENLABS_API_KEY" or "DEEPGRAM_API_KEY"
+  local apiKey = readEnvVarFromFile(envFilePath, apiKeyVar)
   if not apiKey or apiKey == "" then
-    hs.alert.show("Set DEEPGRAM_API_KEY in ~/.hammerspoon/free-whisper-flow/.env", bottomStyle)
+    hs.alert.show("Set " .. apiKeyVar .. " in ~/.hammerspoon/free-whisper-flow/.env", bottomStyle)
     return
   end
 
@@ -104,11 +129,21 @@ local function runTranscriptionStream(task)
     print("📝 Transcription stderr: " .. (stdErr or "(empty)"))
 
     if exitCode == 0 and stdOut and #stdOut > 0 then
-      hs.alert.show("Copied to clipboard", bottomStyle)
-      if autoPasteAfterCopy then
+      -- Check if the focused UI element is a text input field
+      local focusedElement = hs.axuielement.systemWideElement():attributeValue("AXFocusedUIElement")
+      local isTextInput = false
+      if focusedElement then
+        local role = focusedElement:attributeValue("AXRole")
+        isTextInput = (role == "AXTextField" or role == "AXTextArea" or role == "AXComboBox" or role == "AXSearchField")
+      end
+
+      if isTextInput then
+        hs.alert.show("Pasted", bottomStyle)
         hs.timer.doAfter(0.05, function()
           hs.eventtap.keyStroke({"cmd"}, "v", 0)
         end)
+      else
+        hs.alert.show("Copied to clipboard", bottomStyle)
       end
     else
       print("📝 Transcription failed with exit code: " .. tostring(exitCode))
@@ -121,10 +156,75 @@ local function runTranscriptionStream(task)
   task:start()
 end
 
+local function getAvailableAudioDevices()
+  -- Parse ffmpeg's avfoundation device list to get audio device names and indices
+  local output = hs.execute(ffmpegPath .. " -f avfoundation -list_devices true -i '' 2>&1")
+  local devices = {}
+  local inAudio = false
+  for line in output:gmatch("[^\r\n]+") do
+    if line:find("audio devices") then
+      inAudio = true
+    elseif line:find("video devices") then
+      inAudio = false
+    elseif inAudio then
+      local idx, name = line:match("%[(%d+)%]%s+(.+)$")
+      if idx and name then
+        table.insert(devices, { index = tonumber(idx), name = name })
+      end
+    end
+  end
+  return devices
+end
+
 local function getDefaultMicrophone()
-  print("Using system default microphone")
-  -- Use ":default" to let ffmpeg use the system's default audio input device
-  -- This respects the user's Sound Settings preference
+  -- If no preferences configured, just use system default
+  if #micPreference == 0 then
+    print("No MIC_PREFERENCE set, using system default microphone")
+    return ":default"
+  end
+
+  local devices = getAvailableAudioDevices()
+  print("Available audio devices:")
+  for _, d in ipairs(devices) do
+    print("  [" .. d.index .. "] " .. d.name)
+  end
+
+  -- Check preference list in order
+  for _, pref in ipairs(micPreference) do
+    for _, d in ipairs(devices) do
+      if d.name:lower():find(pref:lower(), 1, true) then
+        -- Check blacklist
+        local blocked = false
+        for _, bl in ipairs(micBlacklist) do
+          if d.name:lower():find(bl:lower(), 1, true) then
+            blocked = true
+            break
+          end
+        end
+        if not blocked then
+          print("Selected microphone: [" .. d.index .. "] " .. d.name)
+          return ":" .. tostring(d.index)
+        end
+      end
+    end
+  end
+
+  -- Fallback: first non-blacklisted device
+  for _, d in ipairs(devices) do
+    local blocked = false
+    for _, bl in ipairs(micBlacklist) do
+      if d.name:lower():find(bl:lower(), 1, true) then
+        blocked = true
+        break
+      end
+    end
+    if not blocked then
+      print("Fallback microphone: [" .. d.index .. "] " .. d.name)
+      return ":" .. tostring(d.index)
+    end
+  end
+
+  print("No suitable microphone found, using system default")
   return ":default"
 end
 
@@ -144,16 +244,22 @@ local function startRecording()
 
   local ffmpegCmd = string.format([[%s -hide_banner -loglevel error \
     -f avfoundation -i "%s" \
+    -af "volume=2.0" \
     -ar %d -ac 1 -c:a pcm_s16le -f s16le -]],
     ffmpegPath, microphoneDevice, audioSampleRate)
 
-  local pythonCmd = string.format("%q run --no-project %q --api-key %q", uvPath, transcribeScript, readEnvVarFromFile(envFilePath, "DEEPGRAM_API_KEY"))
+  local apiKeyVar = sttProvider == "elevenlabs" and "ELEVENLABS_API_KEY" or "DEEPGRAM_API_KEY"
+  local apiKeyForCmd = readEnvVarFromFile(envFilePath, apiKeyVar)
+  local pythonCmd = string.format("%q run --no-project %q --provider %s --api-key %q", uvPath, transcribeScript, sttProvider, apiKeyForCmd)
 
   local fullCmd = ffmpegCmd .. " | " .. pythonCmd
 
   print("Using microphone device: " .. microphoneDevice .. " for recording")
   print("Executing streaming command: " .. fullCmd)
 
+
+  -- Play start sound (higher pitch)
+  playSound(2)
 
   wasCancelled = false -- Reset the flag each time we start
   recordingTask = hs.task.new("/bin/bash", nil, {"-lc", fullCmd})
@@ -169,6 +275,9 @@ end
 
 local function stopRecording()
   print("🛑 stopRecording() called")
+
+  -- Play stop sound (lower pitch)
+  playSound(0.8)
 
   -- Exit the modal so the escape key is released
   recordingModal:exit()

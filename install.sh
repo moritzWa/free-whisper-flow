@@ -154,6 +154,23 @@ fi
 
 echo
 
+# Microphone configuration (optional)
+mic_preference=""
+mic_blacklist=""
+echo "🎤 Microphone Configuration (optional)"
+echo "You can set preferred microphones and blacklist others."
+echo "The tool will auto-select the first available preferred mic."
+echo
+echo "Detecting available microphones..."
+if command_exists ffmpeg; then
+    ffmpeg -f avfoundation -list_devices true -i "" 2>&1 | grep -A 20 "audio devices" | grep "^\[" | grep -v "audio devices" | sed 's/.*\] /  /'
+fi
+echo
+read -p "Preferred mics (comma-separated, or Enter to skip): " -r mic_preference
+read -p "Blacklisted mics (comma-separated, or Enter to skip): " -r mic_blacklist
+
+echo
+
 # Check for existing installation
 if [[ -d "$TARGET_DIR" ]]; then
     echo "🔄 Existing installation found at $TARGET_DIR"
@@ -178,9 +195,17 @@ ln -sf "$PROJECT_DIR/hammerspoon/init.lua" "$TARGET_DIR/init.lua"
 ln -sf "$PROJECT_DIR/scripts/transcribe_and_copy.py" "$TARGET_DIR/scripts/transcribe_and_copy.py"
 
 # Create .env file in project root and link it
-echo "DEEPGRAM_API_KEY=${deepgram_key}" > "$PROJECT_DIR/.env"
+{
+    echo "DEEPGRAM_API_KEY=${deepgram_key}"
+    if [[ -n "${mic_preference}" ]]; then
+        echo "MIC_PREFERENCE=${mic_preference}"
+    fi
+    if [[ -n "${mic_blacklist}" ]]; then
+        echo "MIC_BLACKLIST=${mic_blacklist}"
+    fi
+} > "$PROJECT_DIR/.env"
 ln -sf "$PROJECT_DIR/.env" "$TARGET_DIR/.env"
-echo "🔑 API key stored in ${PROJECT_DIR}/.env and linked."
+echo "🔑 Configuration stored in ${PROJECT_DIR}/.env and linked."
 echo "   (Make sure to add .env to your .gitignore file)"
 
 echo "✅ Files linked to ${TARGET_DIR}"
