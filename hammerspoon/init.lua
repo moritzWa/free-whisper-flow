@@ -5,8 +5,10 @@
 local homeDirectory = os.getenv("HOME")
 local recordingsDirectory = homeDirectory .. "/Recordings"
 local transcribeScript = homeDirectory .. "/.hammerspoon/free-whisper-flow/scripts/transcribe_and_copy.py"
+local levelMeterScript = homeDirectory .. "/.hammerspoon/free-whisper-flow/scripts/level_meter.py"
 local envFilePath = homeDirectory .. "/.hammerspoon/free-whisper-flow/.env"
 local uvPath = "/opt/homebrew/bin/uv" -- adjust if uv is elsewhere
+local levelFilePath = "/tmp/fwf_level.txt"
 
 -- Audio settings
 local audioSampleRate = 16000 -- Reduced for efficiency
@@ -102,6 +104,217 @@ local function playSound(rate)
   hs.task.new("/usr/bin/afplay", nil, {"--rate", tostring(rate), popSoundPath}):start()
 end
 
+-- Shared overlay style constants
+local OVERLAY_BG = { red = 0.1, green = 0.1, blue = 0.1, alpha = 0.85 }
+local OVERLAY_RADIUS = 10
+local OVERLAY_BOTTOM_OFFSET = 40
+
+-- Waveform visualization
+local waveformCanvas = nil
+local waveformTimer = nil
+local NUM_BARS = 30
+local BAR_WIDTH = 4
+local BAR_GAP = 2
+local CANVAS_HEIGHT = 40
+local CANVAS_PADDING = 12
+local levelHistory = {}
+
+-- Status overlay: shows spinner or result text in the same pill as the waveform
+local spinnerTimer = nil
+local spinnerAngle = 0
+local resultTimer = nil
+
+local function showSpinnerInCanvas()
+  -- Replace waveform bars with a spinner in the same canvas
+  if not waveformCanvas then return end
+
+  -- Stop waveform updates
+  if waveformTimer then waveformTimer:stop(); waveformTimer = nil end
+
+  -- Hide all bar elements by making them transparent
+  for i = 1, NUM_BARS do
+    waveformCanvas[i + 1].fillColor = { red = 1, green = 1, blue = 1, alpha = 0 }
+  end
+
+  -- Add spinner dots (8 dots in a circle)
+  local cx = waveformCanvas:frame().w / 2
+  local cy = waveformCanvas:frame().h / 2
+  local radius = 12
+  local dotSize = 4
+  local numDots = 8
+
+  for i = 1, numDots do
+    waveformCanvas:appendElements({
+      type = "circle",
+      action = "fill",
+      fillColor = { red = 1, green = 1, blue = 1, alpha = 0.15 },
+      radius = dotSize / 2,
+      center = { x = cx, y = cy },
+    })
+  end
+
+  spinnerAngle = 0
+  spinnerTimer = hs.timer.doEvery(0.08, function()
+    if not waveformCanvas then return end
+    spinnerAngle = spinnerAngle + (2 * math.pi / numDots)
+    local baseIdx = NUM_BARS + 1  -- after background + bars
+    for i = 1, numDots do
+      local angle = spinnerAngle + (i - 1) * (2 * math.pi / numDots)
+      local dx = cx + radius * math.cos(angle)
+      local dy = cy + radius * math.sin(angle)
+      -- Fade: the "leading" dot is brightest
+      local a = 0.15 + 0.75 * ((numDots - i) / numDots)
+      waveformCanvas[baseIdx + i].center = { x = dx, y = dy }
+      waveformCanvas[baseIdx + i].fillColor = { red = 1, green = 1, blue = 1, alpha = a }
+    end
+  end)
+end
+
+local function showResultInCanvas(text, duration)
+  duration = duration or 1
+  if not waveformCanvas then
+    -- Canvas was already destroyed (e.g. cancel), nothing to show
+    return
+  end
+
+  -- Stop spinner
+  if spinnerTimer then spinnerTimer:stop(); spinnerTimer = nil end
+
+  -- Hide spinner dots
+  local baseIdx = NUM_BARS + 1
+  local totalElements = waveformCanvas:elementCount()
+  for i = baseIdx + 1, totalElements do
+    waveformCanvas[i].fillColor = { red = 1, green = 1, blue = 1, alpha = 0 }
+  end
+
+  -- Add result text
+  local canvasFrame = waveformCanvas:frame()
+  waveformCanvas:appendElements({
+    type = "text",
+    text = text,
+    textColor = { red = 1, green = 1, blue = 1, alpha = 0.9 },
+    textAlignment = "center",
+    textFont = ".AppleSystemUIFont",
+    textSize = 18,
+    frame = { x = 0, y = (canvasFrame.h - 22) / 2, w = canvasFrame.w, h = 22 },
+  })
+
+  -- Auto-dismiss after duration
+  -- Store reference to the canvas we want to delete, in case the global changes
+  local canvasToDelete = waveformCanvas
+  resultTimer = hs.timer.doAfter(duration, function()
+    print("📝 Result timer fired, cleaning up canvas")
+    if canvasToDelete then
+      canvasToDelete:delete()
+    end
+    -- Clear globals if they still point to this canvas
+    if waveformCanvas == canvasToDelete then
+      waveformCanvas = nil
+    end
+    resultTimer = nil
+  end)
+end
+
+local function createWaveformCanvas()
+  local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
+  local frame = screen:frame()
+  local totalWidth = NUM_BARS * (BAR_WIDTH + BAR_GAP) - BAR_GAP + (CANVAS_PADDING * 2)
+  local totalHeight = CANVAS_HEIGHT + (CANVAS_PADDING * 2)
+
+  waveformCanvas = hs.canvas.new({
+    x = (frame.w - totalWidth) / 2,
+    y = frame.h - totalHeight - OVERLAY_BOTTOM_OFFSET,
+    w = totalWidth,
+    h = totalHeight,
+  })
+
+  -- Background with rounded corners
+  waveformCanvas:appendElements({
+    type = "rectangle",
+    action = "fill",
+    roundedRectRadii = { xRadius = OVERLAY_RADIUS, yRadius = OVERLAY_RADIUS },
+    fillColor = OVERLAY_BG,
+  })
+
+  -- Add bar elements
+  for i = 1, NUM_BARS do
+    waveformCanvas:appendElements({
+      type = "rectangle",
+      action = "fill",
+      roundedRectRadii = { xRadius = 2, yRadius = 2 },
+      fillColor = { red = 1, green = 1, blue = 1, alpha = 0.9 },
+      frame = {
+        x = CANVAS_PADDING + (i - 1) * (BAR_WIDTH + BAR_GAP),
+        y = CANVAS_PADDING + CANVAS_HEIGHT / 2 - 1,
+        w = BAR_WIDTH,
+        h = 2,
+      },
+    })
+  end
+
+  waveformCanvas:level(hs.canvas.windowLevels.overlay)
+  waveformCanvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
+
+  waveformCanvas:show()
+
+  -- Initialize level history
+  levelHistory = {}
+  for i = 1, NUM_BARS do
+    levelHistory[i] = 0
+  end
+end
+
+local function updateWaveform()
+  if not waveformCanvas then return end
+
+  -- Read current level from file
+  local level = 0
+  local f = io.open(levelFilePath, "r")
+  if f then
+    local val = f:read("*a")
+    f:close()
+    level = tonumber(val) or 0
+  end
+
+  -- Shift history left, add new level on right
+  for i = 1, NUM_BARS - 1 do
+    levelHistory[i] = levelHistory[i + 1]
+  end
+  levelHistory[NUM_BARS] = level
+
+  -- Update bar heights (element indices are offset by 1 for the background)
+  for i = 1, NUM_BARS do
+    local l = levelHistory[i]
+    -- Aggressive scaling: sqrt for more visible quiet speech, then boost
+    local scaled = math.min(1.0, math.sqrt(l) * 2.5)
+    -- Minimum bar height so there's always visible activity
+    local minHeight = 4
+    local barHeight = math.max(minHeight, scaled * CANVAS_HEIGHT)
+    local yPos = CANVAS_PADDING + (CANVAS_HEIGHT - barHeight) / 2
+
+    local alpha = 0.5 + scaled * 0.5
+
+    waveformCanvas[i + 1].frame = {
+      x = CANVAS_PADDING + (i - 1) * (BAR_WIDTH + BAR_GAP),
+      y = yPos,
+      w = BAR_WIDTH,
+      h = barHeight,
+    }
+    waveformCanvas[i + 1].fillColor = { red = 1, green = 1, blue = 1, alpha = alpha }
+  end
+end
+
+local function destroyWaveformCanvas()
+  if waveformTimer then waveformTimer:stop(); waveformTimer = nil end
+  if spinnerTimer then spinnerTimer:stop(); spinnerTimer = nil end
+  if resultTimer then resultTimer:stop(); resultTimer = nil end
+  if waveformCanvas then
+    waveformCanvas:delete()
+    waveformCanvas = nil
+  end
+  os.remove(levelFilePath)
+end
+
 local function runTranscriptionStream(task)
   if not hs.fs.attributes(transcribeScript) then
     print("Transcription script not found: " .. transcribeScript)
@@ -138,19 +351,19 @@ local function runTranscriptionStream(task)
       end
 
       if isTextInput then
-        hs.alert.show("Pasted", bottomStyle)
+        showResultInCanvas("Pasted")
         hs.timer.doAfter(0.05, function()
           hs.eventtap.keyStroke({"cmd"}, "v", 0)
         end)
       else
-        hs.alert.show("Copied to clipboard", bottomStyle)
+        showResultInCanvas("Copied to clipboard")
       end
     else
       print("📝 Transcription failed with exit code: " .. tostring(exitCode))
       if stdErr and #stdErr > 0 then
         print("📝 Error details: " .. stdErr)
       end
-      hs.alert.show("Transcription failed", bottomStyle)
+      showResultInCanvas("Transcription failed")
     end
   end)
   task:start()
@@ -251,8 +464,9 @@ local function startRecording()
   local apiKeyVar = sttProvider == "elevenlabs" and "ELEVENLABS_API_KEY" or "DEEPGRAM_API_KEY"
   local apiKeyForCmd = readEnvVarFromFile(envFilePath, apiKeyVar)
   local pythonCmd = string.format("%q run --no-project %q --provider %s --api-key %q", uvPath, transcribeScript, sttProvider, apiKeyForCmd)
+  local levelCmd = string.format("%q run --no-project %q", uvPath, levelMeterScript)
 
-  local fullCmd = ffmpegCmd .. " | " .. pythonCmd
+  local fullCmd = ffmpegCmd .. " | tee >(" .. levelCmd .. ") | " .. pythonCmd
 
   print("Using microphone device: " .. microphoneDevice .. " for recording")
   print("Executing streaming command: " .. fullCmd)
@@ -266,8 +480,9 @@ local function startRecording()
   runTranscriptionStream(recordingTask)
 
 
-  -- Show persistent recording indicator
-  recordingAlert = hs.alert.show("🔴 Transcribing... (Cmd+Shift+M to stop)", bottomStyle, hs.screen.mainScreen(), 86400) -- 24 hours
+  -- Show waveform visualization
+  createWaveformCanvas()
+  waveformTimer = hs.timer.doEvery(0.066, updateWaveform)  -- ~15fps
 
   -- Enter the modal to capture the escape key
   recordingModal:enter()
@@ -282,11 +497,8 @@ local function stopRecording()
   -- Exit the modal so the escape key is released
   recordingModal:exit()
 
-  -- Dismiss persistent recording alert
-  if recordingAlert then
-    hs.alert.closeSpecific(recordingAlert)
-    recordingAlert = nil
-  end
+  -- Transition waveform to spinner while awaiting transcription
+  showSpinnerInCanvas()
 
   if recordingTask and recordingTask:isRunning() then
     local pid = recordingTask:pid()
@@ -316,17 +528,15 @@ local function cancelRecording()
 
   wasCancelled = true
 
-  if recordingAlert then
-    hs.alert.closeSpecific(recordingAlert)
-    recordingAlert = nil
-  end
+  -- Stop waveform timer but keep canvas for the "Cancelled" message
+  if waveformTimer then waveformTimer:stop(); waveformTimer = nil end
 
   if recordingTask and recordingTask:isRunning() then
     recordingTask:terminate()
   end
   recordingTask = nil
 
-  hs.alert.show("Cancelled", bottomStyle, 2)
+  showResultInCanvas("Cancelled")
 
   recordingModal:exit()
 end
