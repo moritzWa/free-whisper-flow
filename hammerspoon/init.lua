@@ -47,6 +47,7 @@ local lastOutputFile = nil
 local recordingAlert = nil
 local recordingModal = nil
 local wasCancelled = false
+local savedClipboard = nil
 
 -- Find ffmpeg in common locations and via a login shell
 local function findFFmpeg()
@@ -342,6 +343,13 @@ local function runTranscriptionStream(task)
     print("📝 Transcription stderr: " .. (stdErr or "(empty)"))
 
     if exitCode == 0 and stdOut and #stdOut > 0 then
+      -- Parse transcript from JSON stdout
+      local transcript = nil
+      local ok, decoded = pcall(hs.json.decode, stdOut)
+      if ok and decoded and decoded.transcript then
+        transcript = decoded.transcript
+      end
+
       -- Check if the focused UI element is a text input field
       local focusedElement = hs.axuielement.systemWideElement():attributeValue("AXFocusedUIElement")
       local isTextInput = false
@@ -350,12 +358,24 @@ local function runTranscriptionStream(task)
         isTextInput = (role == "AXTextField" or role == "AXTextArea" or role == "AXComboBox" or role == "AXSearchField")
       end
 
-      if isTextInput then
+      if isTextInput and transcript then
+        -- Paste via clipboard, then restore original clipboard contents
+        hs.pasteboard.setContents(transcript)
         showResultInCanvas("Pasted")
         hs.timer.doAfter(0.05, function()
           hs.eventtap.keyStroke({"cmd"}, "v", 0)
+          -- Restore clipboard after a short delay to ensure paste completes
+          hs.timer.doAfter(0.2, function()
+            if savedClipboard then
+              hs.pasteboard.setContents(savedClipboard)
+            end
+          end)
         end)
       else
+        -- No text input focused - copy to clipboard as fallback
+        if transcript then
+          hs.pasteboard.setContents(transcript)
+        end
         showResultInCanvas("Copied to clipboard")
       end
     else
@@ -472,10 +492,15 @@ local function startRecording()
   print("Executing streaming command: " .. fullCmd)
 
 
-  -- Play start sound (higher pitch)
+  -- Play start sound (higher pitch), then mute system audio to prevent bleed
   playSound(2)
+  hs.timer.doAfter(0.15, function()
+    local dev = hs.audiodevice.defaultOutputDevice()
+    if dev then dev:setMuted(true) end
+  end)
 
   wasCancelled = false -- Reset the flag each time we start
+  savedClipboard = hs.pasteboard.getContents() -- Save clipboard before Python overwrites it
   recordingTask = hs.task.new("/bin/bash", nil, {"-lc", fullCmd})
   runTranscriptionStream(recordingTask)
 
@@ -491,7 +516,9 @@ end
 local function stopRecording()
   print("🛑 stopRecording() called")
 
-  -- Play stop sound (lower pitch)
+  -- Unmute system audio and play stop sound
+  local dev = hs.audiodevice.defaultOutputDevice()
+  if dev then dev:setMuted(false) end
   playSound(0.8)
 
   -- Exit the modal so the escape key is released
@@ -525,6 +552,10 @@ end
 
 local function cancelRecording()
   print("🚫 Cancelling recording via Escape key.")
+
+  -- Unmute system audio
+  local dev = hs.audiodevice.defaultOutputDevice()
+  if dev then dev:setMuted(false) end
 
   wasCancelled = true
 

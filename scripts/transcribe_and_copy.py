@@ -118,6 +118,7 @@ async def transcribe_stream_elevenlabs(api_key: str) -> str:
     uri = (
         f"{ELEVENLABS_API_URL}?model_id=scribe_v2_realtime"
         "&audio_format=pcm_16000&commit_strategy=vad"
+        "&language_code=en"
     )
 
     final_transcript_parts = []
@@ -178,7 +179,7 @@ async def transcribe_stream_elevenlabs(api_key: str) -> str:
                     # to catch any remaining messages, then exit
                     use_short = sender_done.is_set()
                     try:
-                        msg_str = await asyncio.wait_for(ws.recv(), timeout=0.3 if use_short else 30.0)
+                        msg_str = await asyncio.wait_for(ws.recv(), timeout=0.8 if use_short else 30.0)
                     except asyncio.TimeoutError:
                         break
                     msg = json.loads(msg_str)
