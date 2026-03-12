@@ -2,41 +2,46 @@
 
 Free version of: Whisper Flow, Aqua Voice, Willow Voice, SuperWhisper, MacWhisper
 
-Type faster by using your voice—for free. Press **Cmd+Shift+M**, speak, and get the transcript in your clipboard the moment you stop. This tool uses real-time audio streaming for near-instant results. It's hackable, with zero vendor lock-in, using free Deepgram credits that last forever.
+Type faster by using your voice - for free. Press **Cmd+Shift+M** (or the **Fn/Globe key**), speak, and get the transcript pasted or copied the moment you stop. Real-time audio streaming with a live waveform visualization for near-instant results. Hackable, with zero vendor lock-in.
 
 https://github.com/user-attachments/assets/3c51bfbc-3645-4828-95f0-d75fc8b34838
 
-## 🚀 Installation
+## Installation
 
 Clone this repository and run the installer:
 
 ```bash
-git clone https://github.com/your-username/free-whisper-flow.git
+git clone https://github.com/moritzWa/free-whisper-flow.git
 cd free-whisper-flow
 ./install.sh
 ```
 
 The installer will:
 
-- ✅ Install dependencies (Homebrew, ffmpeg, Hammerspoon, uv)
-- 🎤 Configure your microphone, Deepgram API key, and Hammerspoon
-- 🚀 Optionally add Hammerspoon to login items for auto-startup
+- Install dependencies (Homebrew, ffmpeg, Hammerspoon, uv)
+- Configure your microphone, API key, and Hammerspoon
+- Optionally add Hammerspoon to login items for auto-startup
 
 ## Usage
 
-1. Press **Cmd+Shift+M** to start recording.
+1. Press **Cmd+Shift+M** (or **Fn/Globe key**) to start recording. You'll hear a sound and see a waveform.
 2. Speak.
-3. Press **Cmd+Shift+M** again to stop.
-4. The transcript is now in your clipboard.
-5. Optionally press escape to cancel the recording.
+3. Press the same key again to stop. A spinner shows while the transcript is being processed.
+4. If your cursor is in a text input, the transcript is pasted directly (your clipboard is preserved). Otherwise it's copied to your clipboard.
+5. Press **Escape** to cancel a recording.
 
-That's it. It works globally across all applications. Optional auto-paste saves you the Cmd+V.
+## Configuration
 
-## Microphone Selection
-
-By default, the tool uses your system's default microphone. You can configure preferred microphones and blacklist others by adding to your `.env` file:
+All settings are in your `.env` file:
 
 ```bash
+# STT provider: "elevenlabs" (default, more accurate) or "deepgram"
+STT_PROVIDER=elevenlabs
+
+# API keys (only the one matching your provider is needed)
+ELEVENLABS_API_KEY=your_key_here
+DEEPGRAM_API_KEY=your_key_here
+
 # Comma-separated list of preferred mics (first available wins)
 MIC_PREFERENCE=BY-GM18CU,MacBook Air Microphone
 
@@ -44,42 +49,59 @@ MIC_PREFERENCE=BY-GM18CU,MacBook Air Microphone
 MIC_BLACKLIST=airpods
 ```
 
-The tool checks each preferred mic in order and picks the first one that's currently connected. If none are available, it falls back to the first non-blacklisted device. To see your available devices, run:
+### STT Providers
+
+- **ElevenLabs Scribe v2** (default) - ~2.3% word error rate, ~2s latency for 8s of audio. Requires an [ElevenLabs API key](https://elevenlabs.io).
+- **Deepgram Nova-2** - ~8.4% word error rate, real-time latency. Requires a [Deepgram API key](https://deepgram.com) (comes with $200 in free credits).
+
+Switch providers by changing `STT_PROVIDER` in `.env`. Both API keys can coexist so you can switch back anytime.
+
+### Microphone Selection
+
+The tool auto-detects available microphones on each recording. It checks `MIC_PREFERENCE` in order and picks the first connected device, skipping anything in `MIC_BLACKLIST`. Falls back to system default if nothing matches.
+
+To see your available devices:
 
 ```bash
 ffmpeg -f avfoundation -list_devices true -i "" 2>&1 | grep -A 20 "audio devices"
 ```
 
-## Smart Paste
+### Fn/Globe Key Binding
 
-When you stop recording, the transcript is always copied to your clipboard. If your cursor is focused on a text input field, it will also auto-paste. Otherwise, it just copies so you can paste manually wherever you want.
+To use the Fn/Globe key as a trigger, install [Karabiner-Elements](https://karabiner-elements.pqrs.org/) and add a rule to remap Fn to F18. The tool listens for F18 automatically.
+
+## Features
+
+- **Live waveform** - real-time audio level visualization while recording
+- **Smart paste** - auto-pastes into text inputs, copies to clipboard otherwise
+- **Clipboard preservation** - your clipboard contents are restored after pasting
+- **System audio muting** - automatically mutes system audio during recording to prevent feedback
+- **Audio boost** - 2x volume boost for better recognition of quiet speech
+- **Sound feedback** - distinct start/stop sounds
+- **Seamless transitions** - waveform -> spinner -> result notification in a single overlay
 
 ## How It Works
 
-This tool uses `ffmpeg` to capture audio and streams it in real-time to a Python script. The script establishes a WebSocket connection with Deepgram's streaming transcription service. As soon as you stop recording, the final transcript is returned and copied to your clipboard. This streaming approach minimizes latency compared to traditional file-based transcription.
+`ffmpeg` captures audio from your microphone and pipes it to a Python script via `tee` (splitting to both a level meter for the waveform and the transcription service). The Python script streams audio over a WebSocket to ElevenLabs or Deepgram and collects the transcript. Hammerspoon handles the global hotkey, waveform visualization, and paste/clipboard logic.
 
 ## Development
 
-Because this project uses symlinks, any changes you make in the project files will be live once you reload the Hammerspoon configuration.
-
-The standard "Reload Config" option can be unreliable. For a guaranteed refresh, run the following command in your terminal:
+Because this project uses symlinks, any changes you make in the project files are live once you reload Hammerspoon:
 
 ```bash
 killall Hammerspoon && sleep 1 && open -a Hammerspoon
 ```
 
-After running the command, you should see a "Config loaded" notification, confirming that your changes have been applied.
-
 ## Requirements
 
 - **macOS**
-- A [Deepgram API key](https://deepgram.com) (comes with $200 in free credits).
+- An [ElevenLabs](https://elevenlabs.io) or [Deepgram](https://deepgram.com) API key
 
 ## Permissions
 
 You will be prompted to grant permissions for:
 
-- **Accessibility**: Hammerspoon needs this for global hotkeys.
+- **Accessibility**: Hammerspoon needs this for global hotkeys and smart paste detection.
 - **Microphone**: macOS will ask on the first recording attempt.
 
 The installer offers to add Hammerspoon to login items, which is recommended so it's always running.

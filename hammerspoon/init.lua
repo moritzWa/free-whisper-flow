@@ -216,7 +216,21 @@ local function showResultInCanvas(text, duration)
   end)
 end
 
+local function destroyWaveformCanvas()
+  if waveformTimer then waveformTimer:stop(); waveformTimer = nil end
+  if spinnerTimer then spinnerTimer:stop(); spinnerTimer = nil end
+  if resultTimer then resultTimer:stop(); resultTimer = nil end
+  if waveformCanvas then
+    waveformCanvas:delete()
+    waveformCanvas = nil
+  end
+  os.remove(levelFilePath)
+end
+
 local function createWaveformCanvas()
+  -- Clean up any existing canvas (e.g. lingering "Cancelled" overlay)
+  destroyWaveformCanvas()
+
   local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
   local frame = screen:frame()
   local totalWidth = NUM_BARS * (BAR_WIDTH + BAR_GAP) - BAR_GAP + (CANVAS_PADDING * 2)
@@ -303,17 +317,6 @@ local function updateWaveform()
     }
     waveformCanvas[i + 1].fillColor = { red = 1, green = 1, blue = 1, alpha = alpha }
   end
-end
-
-local function destroyWaveformCanvas()
-  if waveformTimer then waveformTimer:stop(); waveformTimer = nil end
-  if spinnerTimer then spinnerTimer:stop(); spinnerTimer = nil end
-  if resultTimer then resultTimer:stop(); resultTimer = nil end
-  if waveformCanvas then
-    waveformCanvas:delete()
-    waveformCanvas = nil
-  end
-  os.remove(levelFilePath)
 end
 
 local function runTranscriptionStream(task)
@@ -559,15 +562,40 @@ local function cancelRecording()
 
   wasCancelled = true
 
-  -- Stop waveform timer but keep canvas for the "Cancelled" message
-  if waveformTimer then waveformTimer:stop(); waveformTimer = nil end
-
   if recordingTask and recordingTask:isRunning() then
     recordingTask:terminate()
   end
   recordingTask = nil
 
-  showResultInCanvas("Cancelled")
+  -- Destroy waveform first, then show "Cancelled" in a fresh canvas
+  destroyWaveformCanvas()
+
+  -- Create a small notification canvas
+  local screen = hs.mouse.getCurrentScreen() or hs.screen.mainScreen()
+  local frame = screen:frame()
+  local width = 160
+  local height = 40
+  local cancelCanvas = hs.canvas.new({
+    x = frame.x + (frame.w - width) / 2,
+    y = frame.y + frame.h - height - OVERLAY_BOTTOM_OFFSET,
+    w = width,
+    h = height,
+  })
+  cancelCanvas:appendElements({
+    type = "rectangle", action = "fill",
+    roundedRectRadii = { xRadius = OVERLAY_RADIUS, yRadius = OVERLAY_RADIUS },
+    fillColor = OVERLAY_BG,
+  })
+  cancelCanvas:appendElements({
+    type = "text", text = "Cancelled",
+    textColor = { red = 1, green = 1, blue = 1, alpha = 0.9 },
+    textAlignment = "center", textFont = ".AppleSystemUIFont", textSize = 18,
+    frame = { x = 0, y = (height - 22) / 2, w = width, h = 22 },
+  })
+  cancelCanvas:level(hs.canvas.windowLevels.overlay)
+  cancelCanvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
+  cancelCanvas:show()
+  hs.timer.doAfter(1, function() cancelCanvas:delete() end)
 
   recordingModal:exit()
 end
@@ -589,3 +617,6 @@ recordingModal:bind({}, "escape", function()
 end)
 
 hs.hotkey.bind({"cmd","shift"}, "m", toggleRecording)
+
+-- Also bind F18 (remapped from Fn/Globe key via Karabiner-Elements)
+hs.hotkey.bind({}, "f18", toggleRecording)
