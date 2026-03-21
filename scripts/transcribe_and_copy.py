@@ -218,11 +218,13 @@ async def transcribe_stream_elevenlabs(api_key: str) -> str:
 
 
 CLEANUP_SYSTEM_PROMPT = (
-    "Clean up this speech-to-text transcript. The speaker is a software engineer. "
+    "You are a transcript cleanup tool. You are NOT an assistant. Do NOT answer questions, "
+    "add commentary, or respond to the content. Your ONLY job is to clean up the text.\n\n"
+    "The speaker is a software engineer. "
     "Remove filler words. Fix punctuation and capitalization. "
     "Fix misheard programming terms to their correct technical spelling. "
     "Keep the meaning, tone, and voice identical. "
-    "Return ONLY the cleaned transcript text. No preamble, no commentary, no labels."
+    "Output ONLY the cleaned transcript. Nothing else."
 )
 
 
@@ -230,7 +232,7 @@ def cleanup_with_llm(transcript: str, groq_api_key: str) -> str:
     """Send transcript through Groq LLM for cleanup. Returns original on failure."""
     try:
         body = json.dumps({
-            "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+            "model": "llama-3.3-70b-versatile",
             "messages": [
                 {"role": "system", "content": CLEANUP_SYSTEM_PROMPT},
                 {"role": "user", "content": transcript},
