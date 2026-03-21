@@ -15,6 +15,7 @@ import os
 import ssl
 import sys
 import subprocess
+import urllib.request
 from typing import Optional
 
 import websockets
@@ -216,6 +217,49 @@ async def transcribe_stream_elevenlabs(api_key: str) -> str:
     return " ".join(final_transcript_parts)
 
 
+CLEANUP_SYSTEM_PROMPT = (
+    "Clean up this speech-to-text transcript. The speaker is a software engineer. "
+    "Remove filler words. Fix punctuation and capitalization. "
+    "Fix misheard programming terms to their correct technical spelling. "
+    "Keep the meaning, tone, and voice identical. "
+    "Return ONLY the cleaned transcript text. No preamble, no commentary, no labels."
+)
+
+
+def cleanup_with_llm(transcript: str, groq_api_key: str) -> str:
+    """Send transcript through Groq LLM for cleanup. Returns original on failure."""
+    try:
+        body = json.dumps({
+            "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+            "messages": [
+                {"role": "system", "content": CLEANUP_SYSTEM_PROMPT},
+                {"role": "user", "content": transcript},
+            ],
+            "temperature": 0.1,
+            "max_tokens": 1024,
+        }).encode()
+
+        req = urllib.request.Request(
+            "https://api.groq.com/openai/v1/chat/completions",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {groq_api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "free-whisper-flow/1.0",
+            },
+        )
+        ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+        with urllib.request.urlopen(req, timeout=5, context=ssl_ctx) as resp:
+            result = json.loads(resp.read())
+            cleaned = result["choices"][0]["message"]["content"].strip()
+            if cleaned:
+                print(f"LLM cleanup: '{transcript}' -> '{cleaned}'", file=sys.stderr)
+                return cleaned
+    except Exception as e:
+        print(f"LLM cleanup failed, using raw transcript: {e}", file=sys.stderr)
+    return transcript
+
+
 def copy_to_clipboard(text: str) -> None:
     try:
         subprocess.run(["pbcopy"], input=text.encode("utf-8"), check=True)
@@ -235,6 +279,10 @@ async def main() -> int:
         choices=["deepgram", "elevenlabs"],
         help="STT provider (default: elevenlabs)"
     )
+    parser.add_argument(
+        "--groq-api-key", dest="groq_api_key", default=None,
+        help="Groq API key for LLM transcript cleanup"
+    )
     args = parser.parse_args()
 
     try:
@@ -246,6 +294,9 @@ async def main() -> int:
         if not transcript:
             print("No transcript returned", file=sys.stderr)
             return 1
+        # Optional LLM cleanup via Groq
+        if args.groq_api_key:
+            transcript = cleanup_with_llm(transcript, args.groq_api_key)
         copy_to_clipboard(transcript)
         print(json.dumps({"ok": True, "transcript": transcript}))
         return 0

@@ -1,6 +1,17 @@
 -- Cmd–Shift–M: record microphone audio
 -- After stopping: transcribe with Deepgram → copy transcript to clipboard → optional auto-paste
 
+-- File-based logging so we can debug from terminal
+local fwfLogPath = "/tmp/fwf_debug.log"
+local function fwfLog(msg)
+  local f = io.open(fwfLogPath, "a")
+  if f then
+    f:write(os.date("%H:%M:%S") .. " " .. msg .. "\n")
+    f:close()
+  end
+  print(msg)
+end
+
 -- Configurable paths
 local homeDirectory = os.getenv("HOME")
 local recordingsDirectory = homeDirectory .. "/Recordings"
@@ -48,6 +59,29 @@ local recordingAlert = nil
 local recordingModal = nil
 local wasCancelled = false
 local savedClipboard = nil
+local savedVolume = nil
+local recordingStartTime = nil
+local MIN_RECORDING_SECONDS = 1.5
+local volumeFadeTimer = nil
+
+local function fadeVolume(dev, targetVolume, duration, callback)
+  if volumeFadeTimer then volumeFadeTimer:stop(); volumeFadeTimer = nil end
+  local startVol = dev:outputVolume()
+  local steps = 15
+  local interval = duration / steps
+  local step = 0
+  volumeFadeTimer = hs.timer.doEvery(interval, function()
+    step = step + 1
+    local t = step / steps
+    local vol = startVol + (targetVolume - startVol) * t
+    dev:setOutputVolume(vol)
+    if step >= steps then
+      volumeFadeTimer:stop()
+      volumeFadeTimer = nil
+      if callback then callback() end
+    end
+  end)
+end
 
 -- Find ffmpeg in common locations and via a login shell
 local function findFFmpeg()
@@ -94,6 +128,52 @@ end
 -- Load mic config from .env (falls back to system default if not set)
 local micPreference = splitCsv(readEnvVarFromFile(envFilePath, "MIC_PREFERENCE") or "")
 local micBlacklist  = splitCsv(readEnvVarFromFile(envFilePath, "MIC_BLACKLIST") or "")
+
+-- Apps where we should NEVER auto-paste (only copy to clipboard)
+-- Configurable via NEVER_PASTE_APPS in .env (comma-separated bundle IDs)
+local defaultNeverPasteApps = {
+  "com.apple.finder",
+  "com.apple.Preview",
+}
+local neverPasteAppsEnv = splitCsv(readEnvVarFromFile(envFilePath, "NEVER_PASTE_APPS") or "")
+local neverPasteSet = {}
+for _, id in ipairs(defaultNeverPasteApps) do neverPasteSet[id] = true end
+for _, id in ipairs(neverPasteAppsEnv) do neverPasteSet[id] = true end
+
+-- Detect whether we should auto-paste into the current context.
+-- Default: YES (paste). Only skip for deny-listed apps or when no app is focused.
+-- Logs detailed diagnostics to the Hammerspoon console for debugging.
+local function isTextInput()
+  local frontApp = hs.application.frontmostApplication()
+  local bundleId = frontApp and frontApp:bundleID() or "unknown"
+  local appName = frontApp and frontApp:name() or "unknown"
+
+  -- Log focused element details for debugging
+  local focusedElement = hs.axuielement.systemWideElement():attributeValue("AXFocusedUIElement")
+  if focusedElement then
+    local role = focusedElement:attributeValue("AXRole") or "nil"
+    local subrole = focusedElement:attributeValue("AXSubrole") or "nil"
+    fwfLog(string.format("FWF isTextInput: app=%s (%s) role=%s subrole=%s", appName, bundleId, role, subrole))
+  else
+    fwfLog(string.format("FWF isTextInput: app=%s (%s) focusedElement=nil", appName, bundleId))
+  end
+
+  -- Deny-list: never paste in these apps
+  if neverPasteSet[bundleId] then
+    fwfLog("FWF isTextInput: DENY-LISTED app, clipboard only")
+    return false
+  end
+
+  -- No frontmost app (e.g. desktop focused)
+  if not frontApp then
+    fwfLog("FWF isTextInput: no frontmost app, clipboard only")
+    return false
+  end
+
+  -- Default: paste
+  fwfLog("FWF isTextInput: defaulting to PASTE")
+  return true
+end
 
 -- STT provider: "elevenlabs" (default) or "deepgram"
 local sttProvider = readEnvVarFromFile(envFilePath, "STT_PROVIDER") or "elevenlabs"
@@ -338,12 +418,13 @@ local function runTranscriptionStream(task)
   task:setCallback(function(exitCode, stdOut, stdErr)
     -- If the cancellation flag is set, do nothing.
     if wasCancelled then
-        print("📝 Task callback ignored due to cancellation.")
+        fwfLog("Task callback ignored due to cancellation.")
         return
     end
-    print("📝 Transcription completed with exit code: " .. tostring(exitCode))
-    print("📝 Transcription stdout: " .. (stdOut or "(empty)"))
-    print("📝 Transcription stderr: " .. (stdErr or "(empty)"))
+    fwfLog("Transcription exit=" .. tostring(exitCode) .. " stdout=" .. tostring(stdOut and #stdOut or 0) .. "bytes")
+    if stdErr and #stdErr > 0 then
+      fwfLog("Transcription stderr: " .. stdErr)
+    end
 
     if exitCode == 0 and stdOut and #stdOut > 0 then
       -- Parse transcript from JSON stdout
@@ -352,19 +433,16 @@ local function runTranscriptionStream(task)
       if ok and decoded and decoded.transcript then
         transcript = decoded.transcript
       end
+      fwfLog("Transcript parsed: " .. tostring(transcript ~= nil) .. " text=" .. tostring(transcript and transcript:sub(1, 80) or "nil"))
 
-      -- Check if the focused UI element is a text input field
-      local focusedElement = hs.axuielement.systemWideElement():attributeValue("AXFocusedUIElement")
-      local isTextInput = false
-      if focusedElement then
-        local role = focusedElement:attributeValue("AXRole")
-        isTextInput = (role == "AXTextField" or role == "AXTextArea" or role == "AXComboBox" or role == "AXSearchField")
-      end
+      local shouldPaste = isTextInput()
+      fwfLog("shouldPaste=" .. tostring(shouldPaste) .. " hasTranscript=" .. tostring(transcript ~= nil))
 
-      if isTextInput and transcript then
+      if shouldPaste and transcript then
         -- Paste via clipboard, then restore original clipboard contents
         hs.pasteboard.setContents(transcript)
         showResultInCanvas("Pasted")
+        fwfLog("Set clipboard and sending Cmd+V")
         hs.timer.doAfter(0.05, function()
           hs.eventtap.keyStroke({"cmd"}, "v", 0)
           -- Restore clipboard after a short delay to ensure paste completes
@@ -379,13 +457,11 @@ local function runTranscriptionStream(task)
         if transcript then
           hs.pasteboard.setContents(transcript)
         end
+        fwfLog("Fallback: copied to clipboard only")
         showResultInCanvas("Copied to clipboard")
       end
     else
-      print("📝 Transcription failed with exit code: " .. tostring(exitCode))
-      if stdErr and #stdErr > 0 then
-        print("📝 Error details: " .. stdErr)
-      end
+      fwfLog("Transcription FAILED exit=" .. tostring(exitCode))
       showResultInCanvas("Transcription failed")
     end
   end)
@@ -487,6 +563,10 @@ local function startRecording()
   local apiKeyVar = sttProvider == "elevenlabs" and "ELEVENLABS_API_KEY" or "DEEPGRAM_API_KEY"
   local apiKeyForCmd = readEnvVarFromFile(envFilePath, apiKeyVar)
   local pythonCmd = string.format("%q run --no-project %q --provider %s --api-key %q", uvPath, transcribeScript, sttProvider, apiKeyForCmd)
+  local groqKey = readEnvVarFromFile(envFilePath, "GROQ_API_KEY")
+  if groqKey and groqKey ~= "" then
+    pythonCmd = pythonCmd .. string.format(" --groq-api-key %q", groqKey)
+  end
   local levelCmd = string.format("%q run --no-project %q", uvPath, levelMeterScript)
 
   local fullCmd = ffmpegCmd .. " | tee >(" .. levelCmd .. ") | " .. pythonCmd
@@ -495,14 +575,18 @@ local function startRecording()
   print("Executing streaming command: " .. fullCmd)
 
 
-  -- Play start sound (higher pitch), then mute system audio to prevent bleed
+  -- Play start sound (higher pitch), then smoothly lower system volume
   playSound(2)
   hs.timer.doAfter(0.15, function()
     local dev = hs.audiodevice.defaultOutputDevice()
-    if dev then dev:setMuted(true) end
+    if dev then
+      savedVolume = dev:outputVolume()
+      fadeVolume(dev, savedVolume * 0.8, 0.5)
+    end
   end)
 
   wasCancelled = false -- Reset the flag each time we start
+  recordingStartTime = hs.timer.secondsSinceEpoch()
   savedClipboard = hs.pasteboard.getContents() -- Save clipboard before Python overwrites it
   recordingTask = hs.task.new("/bin/bash", nil, {"-lc", fullCmd})
   runTranscriptionStream(recordingTask)
@@ -519,9 +603,11 @@ end
 local function stopRecording()
   print("🛑 stopRecording() called")
 
-  -- Unmute system audio and play stop sound
+  -- Smoothly restore system volume and play stop sound
   local dev = hs.audiodevice.defaultOutputDevice()
-  if dev then dev:setMuted(false) end
+  if dev and savedVolume then
+    fadeVolume(dev, savedVolume, 0.3, function() savedVolume = nil end)
+  end
   playSound(0.8)
 
   -- Exit the modal so the escape key is released
@@ -556,9 +642,11 @@ end
 local function cancelRecording()
   print("🚫 Cancelling recording via Escape key.")
 
-  -- Unmute system audio
+  -- Smoothly restore system volume
   local dev = hs.audiodevice.defaultOutputDevice()
-  if dev then dev:setMuted(false) end
+  if dev and savedVolume then
+    fadeVolume(dev, savedVolume, 0.3, function() savedVolume = nil end)
+  end
 
   wasCancelled = true
 
@@ -601,12 +689,18 @@ local function cancelRecording()
 end
 
 local function toggleRecording()
-  print("🔄 toggleRecording() called")
+  fwfLog("toggleRecording() called")
   if recordingTask and recordingTask:isRunning() then
-    print("🔄 Task is running, calling stopRecording()")
+    -- Ignore stop if recording just started (accidental double-tap)
+    local elapsed = hs.timer.secondsSinceEpoch() - (recordingStartTime or 0)
+    if elapsed < MIN_RECORDING_SECONDS then
+      fwfLog(string.format("Ignoring stop - only %.1fs elapsed (min %.1fs)", elapsed, MIN_RECORDING_SECONDS))
+      return
+    end
+    fwfLog("Task is running, calling stopRecording()")
     stopRecording()
   else
-    print("🔄 No task running, calling startRecording()")
+    fwfLog("No task running, calling startRecording()")
     startRecording()
   end
 end
