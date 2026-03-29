@@ -84,15 +84,15 @@ async function run() {
   // 1. Provider selection
   const providerChoices = [
     {
-      title: "FluidAudio (local, free) - ~3% WER, ~275ms, runs on Apple Neural Engine",
+      title: "FluidAudio - local, free, ~3% error rate, ~275ms (Apple Neural Engine)",
       value: "fluidaudio",
     },
     {
-      title: "ElevenLabs Scribe v2 (cloud) - ~2.3% WER, ~800ms, requires API key",
+      title: "ElevenLabs Scribe v2 - cloud, ~2.3% error rate, ~800ms (API key required)",
       value: "elevenlabs",
     },
     {
-      title: "Deepgram Nova-2 (cloud) - ~8.4% WER, real-time, requires API key ($200 free credits)",
+      title: "Deepgram Nova-2 - cloud, ~8.4% error rate, real-time ($200 free credits)",
       value: "deepgram",
     },
   ];
@@ -105,7 +105,7 @@ async function run() {
     {
       type: "select",
       name: "provider",
-      message: "Choose STT provider",
+      message: "Choose transcription provider",
       choices: providerChoices,
       initial: Math.max(0, defaultProvider),
     },

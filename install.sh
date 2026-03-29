@@ -66,7 +66,7 @@ for dep in ffmpeg uv; do
 done
 
 if ! brew list --cask hammerspoon &>/dev/null && ! [[ -d "/Applications/Hammerspoon.app" ]]; then
-    echo "❌ Hammerspoon not found"
+    echo "❌ Hammerspoon not found (macOS automation framework that powers the hotkey and UI)"
     if ask_yes_no "Install Hammerspoon via Homebrew?" "y"; then
         brew install --cask hammerspoon
     else
@@ -172,10 +172,7 @@ fi
 echo
 echo "🎉 Setup complete!"
 echo
-echo "Next steps:"
-echo "  1. Grant Accessibility permissions when prompted"
-echo "  2. Grant Microphone permissions on first recording"
-echo
 HOTKEY=$(grep "^HOTKEY=" "$PROJECT_DIR/.env" 2>/dev/null | cut -d= -f2 || echo "cmd+shift+m")
 echo "Press ${HOTKEY} to start recording. Run 'fwf' to change settings."
+echo "macOS will ask for Accessibility and Microphone permissions on first use."
 echo
