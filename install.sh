@@ -170,9 +170,35 @@ if ask_yes_no "Add Hammerspoon to login items (auto-start on boot)?" "y"; then
 fi
 
 echo
+# --- 7. Ensure Accessibility permissions ---
+
+echo
+echo "🔐 Checking Accessibility permissions..."
+sleep 2  # Give Hammerspoon a moment to start and request permissions
+
+# Check if Hammerspoon has accessibility access
+if ! osascript -e 'tell application "System Events" to key code 0' &>/dev/null; then
+    echo "⚠️  Hammerspoon needs Accessibility permissions to detect hotkeys."
+    echo "   Opening System Settings - please toggle Hammerspoon ON, then come back here."
+    echo
+    open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+    echo -n "   Waiting for you to grant permission..."
+    while ! osascript -e 'tell application "System Events" to key code 0' &>/dev/null 2>&1; do
+        sleep 2
+        echo -n "."
+    done
+    echo
+    echo "✅ Accessibility permissions granted!"
+    # Restart Hammerspoon to pick up permissions
+    killall Hammerspoon 2>/dev/null && sleep 1
+    open -a Hammerspoon 2>/dev/null
+else
+    echo "✅ Accessibility permissions already granted"
+fi
+
+echo
 echo "🎉 Setup complete!"
 echo
 HOTKEY=$(grep "^HOTKEY=" "$PROJECT_DIR/.env" 2>/dev/null | cut -d= -f2 || echo "cmd+shift+m")
 echo "Press ${HOTKEY} to start recording. Run 'fwf' to change settings."
-echo "macOS will ask for Accessibility and Microphone permissions on first use."
 echo
