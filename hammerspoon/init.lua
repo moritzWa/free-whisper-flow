@@ -20,6 +20,8 @@ local levelMeterScript = homeDirectory .. "/.hammerspoon/free-whisper-flow/scrip
 local envFilePath = homeDirectory .. "/.hammerspoon/free-whisper-flow/.env"
 local uvPath = "/opt/homebrew/bin/uv" -- adjust if uv is elsewhere
 local levelFilePath = "/tmp/fwf_level.txt"
+local fluidaudioBridge = homeDirectory .. "/.hammerspoon/free-whisper-flow/tools/fluidaudio-bridge/.build/release/fluidaudio-bridge"
+local fluidaudioTempWav = "/tmp/fwf_recording.wav"
 
 -- Audio settings
 local audioSampleRate = 16000 -- Reduced for efficiency
@@ -61,7 +63,7 @@ local wasCancelled = false
 local savedClipboard = nil
 local savedVolume = nil
 local recordingStartTime = nil
-local MIN_RECORDING_SECONDS = 1.5
+local MIN_RECORDING_SECONDS = 0.8
 local volumeFadeTimer = nil
 
 local function fadeVolume(dev, targetVolume, duration, callback)
@@ -129,6 +131,18 @@ end
 local micPreference = splitCsv(readEnvVarFromFile(envFilePath, "MIC_PREFERENCE") or "")
 local micBlacklist  = splitCsv(readEnvVarFromFile(envFilePath, "MIC_BLACKLIST") or "")
 
+-- Invalidate cached mic when audio devices change (e.g. AirPods connect/disconnect)
+local micWatcherReady = false
+hs.audiodevice.watcher.setCallback(function(event)
+  if event == "dev#" and micWatcherReady then
+    fwfLog("Audio devices changed, clearing cached mic")
+    microphoneDevice = nil
+  end
+end)
+hs.audiodevice.watcher.start()
+-- Ignore device events for the first 3s (startup noise), then enable cache clearing
+hs.timer.doAfter(3, function() micWatcherReady = true end)
+
 -- Apps where we should NEVER auto-paste (only copy to clipboard)
 -- Configurable via NEVER_PASTE_APPS in .env (comma-separated bundle IDs)
 local defaultNeverPasteApps = {
@@ -175,14 +189,25 @@ local function isTextInput()
   return true
 end
 
--- STT provider: "elevenlabs" (default) or "deepgram"
+-- STT provider: "elevenlabs" (default), "deepgram", or "fluidaudio"
 local sttProvider = readEnvVarFromFile(envFilePath, "STT_PROVIDER") or "elevenlabs"
 print("STT provider: " .. sttProvider)
 
--- Feedback sounds: same sound (Pop), higher pitch on start, lower on stop
-local popSoundPath = "/System/Library/Sounds/Pop.aiff"
-local function playSound(rate)
-  hs.task.new("/usr/bin/afplay", nil, {"--rate", tostring(rate), popSoundPath}):start()
+-- Cache API keys at init time (avoid reading .env on every recording)
+local cachedApiKey = nil
+if sttProvider == "elevenlabs" then
+  cachedApiKey = readEnvVarFromFile(envFilePath, "ELEVENLABS_API_KEY")
+elseif sttProvider == "deepgram" then
+  cachedApiKey = readEnvVarFromFile(envFilePath, "DEEPGRAM_API_KEY")
+end
+local cachedGroqKey = readEnvVarFromFile(envFilePath, "GROQ_API_KEY")
+if cachedGroqKey == "" then cachedGroqKey = nil end
+
+-- Feedback sound: Pop.aiff, pre-loaded for instant playback
+local feedbackSound = hs.sound.getByFile("/System/Library/Sounds/Pop.aiff")
+local function playSound()
+  feedbackSound:stop()
+  feedbackSound:play()
 end
 
 -- Shared overlay style constants
@@ -399,71 +424,97 @@ local function updateWaveform()
   end
 end
 
+-- Shared handler for transcription results (used by both cloud and local providers)
+local function handleTranscriptionResult(exitCode, stdOut, stdErr)
+  if wasCancelled then
+    fwfLog("Task callback ignored due to cancellation.")
+    return
+  end
+  fwfLog("Transcription exit=" .. tostring(exitCode) .. " stdout=" .. tostring(stdOut and #stdOut or 0) .. "bytes")
+  if stdErr and #stdErr > 0 then
+    fwfLog("Transcription stderr: " .. stdErr)
+  end
+
+  if exitCode == 0 and stdOut and #stdOut > 0 then
+    local transcript = nil
+    local ok, decoded = pcall(hs.json.decode, stdOut)
+    if ok and decoded and decoded.transcript then
+      transcript = decoded.transcript
+    end
+    fwfLog("Transcript parsed: " .. tostring(transcript ~= nil) .. " text=" .. tostring(transcript and transcript:sub(1, 80) or "nil"))
+
+    -- Optional Groq LLM cleanup (for fluidaudio provider, cleanup is done here instead of Python)
+    if transcript and cachedGroqKey and sttProvider == "fluidaudio" then
+      local groqStart = hs.timer.secondsSinceEpoch()
+      fwfLog("Running Groq cleanup on transcript...")
+      local groqBody = hs.json.encode({
+        model = "llama-3.3-70b-versatile",
+        messages = {
+          { role = "system", content = "You are a transcript cleanup tool. You are NOT an assistant. Do NOT answer questions, add commentary, or respond to the content. Your ONLY job is to clean up the text.\n\nThe speaker is a software engineer. Remove filler words. Fix punctuation and capitalization. Fix misheard programming terms to their correct technical spelling. Keep the meaning, tone, and voice identical. Output ONLY the cleaned transcript. Nothing else." },
+          { role = "user", content = transcript },
+        },
+        temperature = 0.1,
+        max_tokens = 1024,
+      })
+      local headers = {
+        ["Authorization"] = "Bearer " .. cachedGroqKey,
+        ["Content-Type"] = "application/json",
+      }
+      local status, body = hs.http.post("https://api.groq.com/openai/v1/chat/completions", groqBody, headers)
+      if status == 200 and body then
+        local gOk, gDecoded = pcall(hs.json.decode, body)
+        if gOk and gDecoded and gDecoded.choices and gDecoded.choices[1] then
+          local cleaned = gDecoded.choices[1].message and gDecoded.choices[1].message.content
+          if cleaned and #cleaned > 0 then
+            fwfLog("Groq cleanup: '" .. transcript:sub(1, 40) .. "' -> '" .. cleaned:sub(1, 40) .. "'")
+            transcript = cleaned
+          end
+        end
+      end
+      fwfLog(string.format("Groq cleanup took %.0fms", (hs.timer.secondsSinceEpoch() - groqStart) * 1000))
+    end
+
+    local shouldPaste = isTextInput()
+    fwfLog("shouldPaste=" .. tostring(shouldPaste) .. " hasTranscript=" .. tostring(transcript ~= nil))
+
+    if shouldPaste and transcript then
+      hs.pasteboard.setContents(transcript)
+      showResultInCanvas("Pasted")
+      fwfLog("Set clipboard and sending Cmd+V")
+      hs.timer.doAfter(0.05, function()
+        hs.eventtap.keyStroke({"cmd"}, "v", 0)
+        hs.timer.doAfter(0.2, function()
+          if savedClipboard then
+            hs.pasteboard.setContents(savedClipboard)
+          end
+        end)
+      end)
+    else
+      if transcript then
+        hs.pasteboard.setContents(transcript)
+      end
+      fwfLog("Fallback: copied to clipboard only")
+      showResultInCanvas("Copied to clipboard")
+    end
+  else
+    fwfLog("Transcription FAILED exit=" .. tostring(exitCode))
+    showResultInCanvas("Transcription failed")
+  end
+end
+
 local function runTranscriptionStream(task)
   if not hs.fs.attributes(transcribeScript) then
     print("Transcription script not found: " .. transcribeScript)
     return
   end
-  if not hs.fs.attributes(uvPath) then
-    hs.alert.show("uv not found at " .. uvPath .. " - reinstall required", bottomStyle)
-    return
-  end
-  local apiKeyVar = sttProvider == "elevenlabs" and "ELEVENLABS_API_KEY" or "DEEPGRAM_API_KEY"
-  local apiKey = readEnvVarFromFile(envFilePath, apiKeyVar)
-  if not apiKey or apiKey == "" then
+  if not cachedApiKey or cachedApiKey == "" then
+    local apiKeyVar = sttProvider == "elevenlabs" and "ELEVENLABS_API_KEY" or "DEEPGRAM_API_KEY"
     hs.alert.show("Set " .. apiKeyVar .. " in ~/.hammerspoon/free-whisper-flow/.env", bottomStyle)
     return
   end
 
   task:setCallback(function(exitCode, stdOut, stdErr)
-    -- If the cancellation flag is set, do nothing.
-    if wasCancelled then
-        fwfLog("Task callback ignored due to cancellation.")
-        return
-    end
-    fwfLog("Transcription exit=" .. tostring(exitCode) .. " stdout=" .. tostring(stdOut and #stdOut or 0) .. "bytes")
-    if stdErr and #stdErr > 0 then
-      fwfLog("Transcription stderr: " .. stdErr)
-    end
-
-    if exitCode == 0 and stdOut and #stdOut > 0 then
-      -- Parse transcript from JSON stdout
-      local transcript = nil
-      local ok, decoded = pcall(hs.json.decode, stdOut)
-      if ok and decoded and decoded.transcript then
-        transcript = decoded.transcript
-      end
-      fwfLog("Transcript parsed: " .. tostring(transcript ~= nil) .. " text=" .. tostring(transcript and transcript:sub(1, 80) or "nil"))
-
-      local shouldPaste = isTextInput()
-      fwfLog("shouldPaste=" .. tostring(shouldPaste) .. " hasTranscript=" .. tostring(transcript ~= nil))
-
-      if shouldPaste and transcript then
-        -- Paste via clipboard, then restore original clipboard contents
-        hs.pasteboard.setContents(transcript)
-        showResultInCanvas("Pasted")
-        fwfLog("Set clipboard and sending Cmd+V")
-        hs.timer.doAfter(0.05, function()
-          hs.eventtap.keyStroke({"cmd"}, "v", 0)
-          -- Restore clipboard after a short delay to ensure paste completes
-          hs.timer.doAfter(0.2, function()
-            if savedClipboard then
-              hs.pasteboard.setContents(savedClipboard)
-            end
-          end)
-        end)
-      else
-        -- No text input focused - copy to clipboard as fallback
-        if transcript then
-          hs.pasteboard.setContents(transcript)
-        end
-        fwfLog("Fallback: copied to clipboard only")
-        showResultInCanvas("Copied to clipboard")
-      end
-    else
-      fwfLog("Transcription FAILED exit=" .. tostring(exitCode))
-      showResultInCanvas("Transcription failed")
-    end
+    handleTranscriptionResult(exitCode, stdOut, stdErr)
   end)
   task:start()
 end
@@ -541,42 +592,56 @@ local function getDefaultMicrophone()
 end
 
 local function startRecording()
+  local startTime = hs.timer.secondsSinceEpoch()
+  fwfLog(string.format("startRecording() entered at %.3f", startTime))
+  -- Play sound FIRST for instant feedback
+  playSound()
+  fwfLog(string.format("Sound dispatched in %.0fms", (hs.timer.secondsSinceEpoch() - startTime) * 1000))
+
   if not ffmpegPath then
     hs.alert.show("ffmpeg not available", bottomStyle)
     return
   end
 
-  -- Use system default microphone
-  microphoneDevice = getDefaultMicrophone()
+  -- Use cached mic if available, otherwise detect (saves ~250ms)
+  if not microphoneDevice then
+    microphoneDevice = getDefaultMicrophone()
+  end
+  fwfLog(string.format("Mic selected in %.0fms", (hs.timer.secondsSinceEpoch() - startTime) * 1000))
 
   hs.fs.mkdir(recordingsDirectory)
 
-  -- Note: We no longer save a file, but ffmpeg might need a dummy path in some configs.
-  -- The important part is piping to stdout with '-'.
+  local fullCmd
+  -- level_meter.py has no dependencies, run with python3 directly (skips uv overhead)
+  local levelCmd = string.format("python3 %q", levelMeterScript)
 
-  local ffmpegCmd = string.format([[%s -hide_banner -loglevel error \
-    -f avfoundation -i "%s" \
-    -af "volume=2.0" \
-    -ar %d -ac 1 -c:a pcm_s16le -f s16le -]],
-    ffmpegPath, microphoneDevice, audioSampleRate)
+  if sttProvider == "fluidaudio" then
+    -- FluidAudio (local): ffmpeg writes WAV to temp file AND pipes raw PCM to level meter for waveform
+    os.remove(fluidaudioTempWav)
+    local ffmpegCmd = string.format(
+      [[%s -hide_banner -loglevel error -f avfoundation -i "%s" -af "volume=2.0" -ar %d -ac 1 -c:a pcm_s16le -f s16le pipe:1 -ar %d -ac 1 %s]],
+      ffmpegPath, microphoneDevice, audioSampleRate, audioSampleRate, fluidaudioTempWav)
+    fullCmd = ffmpegCmd .. " | " .. levelCmd
+  else
+    -- Cloud providers: stream audio to Python transcription script
+    local ffmpegCmd = string.format([[%s -hide_banner -loglevel error \
+      -f avfoundation -i "%s" \
+      -af "volume=2.0" \
+      -ar %d -ac 1 -c:a pcm_s16le -f s16le -]],
+      ffmpegPath, microphoneDevice, audioSampleRate)
 
-  local apiKeyVar = sttProvider == "elevenlabs" and "ELEVENLABS_API_KEY" or "DEEPGRAM_API_KEY"
-  local apiKeyForCmd = readEnvVarFromFile(envFilePath, apiKeyVar)
-  local pythonCmd = string.format("%q run --no-project %q --provider %s --api-key %q", uvPath, transcribeScript, sttProvider, apiKeyForCmd)
-  local groqKey = readEnvVarFromFile(envFilePath, "GROQ_API_KEY")
-  if groqKey and groqKey ~= "" then
-    pythonCmd = pythonCmd .. string.format(" --groq-api-key %q", groqKey)
+    local pythonCmd = string.format("%q run --no-project %q --provider %s --api-key %q", uvPath, transcribeScript, sttProvider, cachedApiKey)
+    if cachedGroqKey then
+      pythonCmd = pythonCmd .. string.format(" --groq-api-key %q", cachedGroqKey)
+    end
+    local cloudLevelCmd = string.format("python3 %q", levelMeterScript)
+    fullCmd = ffmpegCmd .. " | tee >(" .. cloudLevelCmd .. ") | " .. pythonCmd
   end
-  local levelCmd = string.format("%q run --no-project %q", uvPath, levelMeterScript)
 
-  local fullCmd = ffmpegCmd .. " | tee >(" .. levelCmd .. ") | " .. pythonCmd
+  fwfLog("Using microphone device: " .. microphoneDevice .. " for recording")
+  fwfLog(string.format("Command built in %.0fms", (hs.timer.secondsSinceEpoch() - startTime) * 1000))
 
-  print("Using microphone device: " .. microphoneDevice .. " for recording")
-  print("Executing streaming command: " .. fullCmd)
-
-
-  -- Play start sound (higher pitch), then smoothly lower system volume
-  playSound(2)
+  -- Lower volume slightly while recording
   hs.timer.doAfter(0.15, function()
     local dev = hs.audiodevice.defaultOutputDevice()
     if dev then
@@ -585,12 +650,19 @@ local function startRecording()
     end
   end)
 
-  wasCancelled = false -- Reset the flag each time we start
+  wasCancelled = false
   recordingStartTime = hs.timer.secondsSinceEpoch()
-  savedClipboard = hs.pasteboard.getContents() -- Save clipboard before Python overwrites it
-  recordingTask = hs.task.new("/bin/bash", nil, {"-lc", fullCmd})
-  runTranscriptionStream(recordingTask)
+  savedClipboard = hs.pasteboard.getContents()
 
+  if sttProvider == "fluidaudio" then
+    recordingTask = hs.task.new("/bin/bash", function(exitCode, stdOut, stdErr)
+      fwfLog("FluidAudio recording task ended, exit=" .. tostring(exitCode))
+    end, {"-c", fullCmd})
+    recordingTask:start()
+  else
+    recordingTask = hs.task.new("/bin/bash", nil, {"-c", fullCmd})
+    runTranscriptionStream(recordingTask)
+  end
 
   -- Show waveform visualization
   createWaveformCanvas()
@@ -601,14 +673,15 @@ local function startRecording()
 end
 
 local function stopRecording()
-  print("🛑 stopRecording() called")
+  local stopTime = hs.timer.secondsSinceEpoch()
+  fwfLog(string.format("stopRecording() called at %.3f (recorded %.1fs)", stopTime, stopTime - (recordingStartTime or stopTime)))
 
   -- Smoothly restore system volume and play stop sound
   local dev = hs.audiodevice.defaultOutputDevice()
   if dev and savedVolume then
     fadeVolume(dev, savedVolume, 0.3, function() savedVolume = nil end)
   end
-  playSound(0.8)
+  playSound()
 
   -- Exit the modal so the escape key is released
   recordingModal:exit()
@@ -637,6 +710,34 @@ local function stopRecording()
     print("🛑 No recording task running or not running")
   end
   recordingTask = nil
+
+  -- For fluidaudio: now run the local transcription on the recorded WAV file
+  if sttProvider == "fluidaudio" then
+    if not hs.fs.attributes(fluidaudioBridge) then
+      fwfLog("FluidAudio bridge not found at: " .. fluidaudioBridge)
+      showResultInCanvas("FluidAudio not built - run install.sh")
+      return
+    end
+    -- Small delay to let ffmpeg finish writing the WAV file
+    hs.timer.doAfter(0.1, function()
+      if wasCancelled then return end
+      if not hs.fs.attributes(fluidaudioTempWav) then
+        fwfLog("No recording file found at: " .. fluidaudioTempWav)
+        showResultInCanvas("No audio recorded")
+        return
+      end
+      local fileSize = hs.fs.attributes(fluidaudioTempWav, "size") or 0
+      fwfLog(string.format("Starting FluidAudio transcription on: %s (%.1f KB)", fluidaudioTempWav, fileSize / 1024))
+      local transcribeStart = hs.timer.secondsSinceEpoch()
+      local transcribeTask = hs.task.new(fluidaudioBridge, function(exitCode, stdOut, stdErr)
+        local transcribeElapsed = hs.timer.secondsSinceEpoch() - transcribeStart
+        fwfLog(string.format("FluidAudio transcription took %.0fms (exit=%d)", transcribeElapsed * 1000, exitCode))
+        handleTranscriptionResult(exitCode, stdOut, stdErr)
+        os.remove(fluidaudioTempWav)
+      end, {fluidaudioTempWav})
+      transcribeTask:start()
+    end)
+  end
 end
 
 local function cancelRecording()
@@ -689,7 +790,8 @@ local function cancelRecording()
 end
 
 local function toggleRecording()
-  fwfLog("toggleRecording() called")
+  local hotkeyTime = hs.timer.secondsSinceEpoch()
+  fwfLog(string.format("toggleRecording() called at %.3f", hotkeyTime))
   if recordingTask and recordingTask:isRunning() then
     -- Ignore stop if recording just started (accidental double-tap)
     local elapsed = hs.timer.secondsSinceEpoch() - (recordingStartTime or 0)
@@ -710,7 +812,31 @@ recordingModal:bind({}, "escape", function()
     cancelRecording()
 end)
 
-hs.hotkey.bind({"cmd","shift"}, "m", toggleRecording)
+-- Configurable hotkey: HOTKEY=cmd+shift+m (default) or e.g. HOTKEY=ctrl+alt+r
+local hotkeyStr = readEnvVarFromFile(envFilePath, "HOTKEY") or "cmd+shift+m"
+local hotkeyMods = {}
+local hotkeyKey = nil
+for part in hotkeyStr:gmatch("[^+]+") do
+  part = part:gsub("^%s+", ""):gsub("%s+$", ""):lower()
+  if part == "cmd" or part == "ctrl" or part == "alt" or part == "shift" then
+    table.insert(hotkeyMods, part)
+  else
+    hotkeyKey = part
+  end
+end
+if hotkeyKey then
+  hs.hotkey.bind(hotkeyMods, hotkeyKey, toggleRecording)
+  fwfLog("Hotkey bound: " .. hotkeyStr)
+else
+  hs.hotkey.bind({"cmd","shift"}, "m", toggleRecording)
+  fwfLog("Invalid HOTKEY in .env, using default cmd+shift+m")
+end
 
 -- Also bind F18 (remapped from Fn/Globe key via Karabiner-Elements)
 hs.hotkey.bind({}, "f18", toggleRecording)
+
+-- Pre-warm mic cache so first recording is instant
+hs.timer.doAfter(1, function()
+  microphoneDevice = getDefaultMicrophone()
+  fwfLog("Pre-warmed mic cache: " .. tostring(microphoneDevice))
+end)

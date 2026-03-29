@@ -1,13 +1,15 @@
 {
   "name": "free-whisper-flow",
   "version": "1.0.0",
-  "description": "Cross-platform CLI to transcribe clipboard audio with Whisper",
+  "type": "module",
+  "description": "Free, local voice-to-text for macOS",
   "main": "index.js",
   "bin": {
     "free-whisper-flow": "./index.js"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "setup": "node setup.js",
+    "settings": "node setup.js --settings"
   },
   "author": "",
   "license": "ISC",

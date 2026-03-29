@@ -2,17 +2,12 @@
 set -euo pipefail
 
 # Interactive installer for free-whisper-flow
-# - Checks and installs Homebrew, ffmpeg, Hammerspoon, uv
-# - Sets up ~/.hammerspoon/free-whisper-flow directory
-# - Prompts for Deepgram API key and creates .env file
-# - Configures Hammerspoon's init.lua to load the script
-
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TARGET_DIR="$HOME/.hammerspoon/free-whisper-flow"
 HAMMERSPOON_INIT="$HOME/.hammerspoon/init.lua"
 
-echo "🎙️  free-whisper-flow - Interactive Installer"
-echo "=================================================="
+echo "🎙️  free-whisper-flow installer"
+echo "================================"
 echo
 
 # Function to ask yes/no questions
@@ -29,7 +24,6 @@ ask_yes_no() {
         else
             read -p "$prompt [y/n]: " -r answer
         fi
-        
         case "$answer" in
             [Yy]|[Yy][Ee][Ss]) return 0 ;;
             [Nn]|[Nn][Oo]) return 1 ;;
@@ -38,225 +32,150 @@ ask_yes_no() {
     done
 }
 
-# Function to check if command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Check for required dependencies
+# --- 1. System dependencies ---
+
 echo "🔍 Checking dependencies..."
 
-# Check Homebrew
 if ! command_exists brew; then
     echo "❌ Homebrew not found"
-    if ask_yes_no "Install Homebrew?"; then
-        echo "Installing Homebrew..."
+    if ask_yes_no "Install Homebrew?" "y"; then
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-        # Add to PATH for this session
-        if [[ -f "/opt/homebrew/bin/brew" ]]; then
-            export PATH="/opt/homebrew/bin:$PATH"
+        [[ -f "/opt/homebrew/bin/brew" ]] && export PATH="/opt/homebrew/bin:$PATH"
+    else
+        echo "❌ Homebrew is required. Exiting."; exit 1
+    fi
+else
+    echo "✅ Homebrew"
+fi
+
+for dep in ffmpeg uv; do
+    if ! command_exists "$dep"; then
+        echo "❌ $dep not found"
+        if ask_yes_no "Install $dep via Homebrew?" "y"; then
+            brew install "$dep"
+        else
+            echo "❌ $dep is required. Exiting."; exit 1
         fi
     else
-        echo "❌ Homebrew is required. Exiting."
-        exit 1
+        echo "✅ $dep"
     fi
-else
-    echo "✅ Homebrew found"
-fi
+done
 
-# Check ffmpeg
-if ! command_exists ffmpeg; then
-    echo "❌ ffmpeg not found"
-    if ask_yes_no "Install ffmpeg via Homebrew?" "y"; then
-        echo "Installing ffmpeg..."
-        brew install ffmpeg
-    else
-        echo "❌ ffmpeg is required. Exiting."
-        exit 1
-    fi
-else
-    echo "✅ ffmpeg found"
-fi
-
-# Check uv (required for Python execution and dependency management)
-if ! command_exists uv; then
-    echo "❌ uv not found"
-    if ask_yes_no "Install uv via Homebrew?" "y"; then
-        echo "Installing uv..."
-        brew install uv
-    else
-        echo "❌ uv is required for Python execution. Exiting."
-        exit 1
-    fi
-else
-    echo "✅ uv found"
-fi
-
-# Check for gdate (for benchmarking)
-if ! command_exists gdate; then
-    echo "❌ gdate not found (part of coreutils)"
-    if ask_yes_no "Install coreutils via Homebrew?" "y"; then
-        echo "Installing coreutils..."
-        brew install coreutils
-    else
-        echo "⚠️  Warning: gdate is required for the benchmark.sh script."
-    fi
-else
-    echo "✅ gdate found"
-fi
-
-# Check Hammerspoon
 if ! brew list --cask hammerspoon &>/dev/null && ! [[ -d "/Applications/Hammerspoon.app" ]]; then
     echo "❌ Hammerspoon not found"
     if ask_yes_no "Install Hammerspoon via Homebrew?" "y"; then
-        echo "Installing Hammerspoon..."
         brew install --cask hammerspoon
-        echo "📝 After installation, you'll need to:"
-        echo "   1. Open Hammerspoon from Applications"
-        echo "   2. Grant Accessibility permissions when prompted"
-        echo "   3. Enable 'Launch Hammerspoon at login' in Preferences"
     else
-        echo "❌ Hammerspoon is required. Exiting."
-        exit 1
+        echo "❌ Hammerspoon is required. Exiting."; exit 1
     fi
 else
-    echo "✅ Hammerspoon found"
+    echo "✅ Hammerspoon"
 fi
 
-echo
-
-echo
-
-# Check for existing Deepgram API key
-deepgram_key=""
-if [[ -f "${TARGET_DIR}/.env" ]] && grep -q "DEEPGRAM_API_KEY=" "${TARGET_DIR}/.env"; then
-    existing_key=$(grep "DEEPGRAM_API_KEY=" "${TARGET_DIR}/.env" | cut -d'=' -f2 | tr -d '"' | tr -d "'")
-    if [[ -n "${existing_key}" && "${existing_key}" != "your_api_key_here" ]]; then
-        echo "🔑 Found existing Deepgram API key"
-        deepgram_key="${existing_key}"
-    fi
-fi
-
-# Get Deepgram API key if not found
-if [[ -z "${deepgram_key}" ]]; then
-    echo "🔑 Deepgram API Key Setup"
-    echo "You need a Deepgram API key for transcription."
-    echo "Get one free at: https://deepgram.com"
-    echo
-
-    while [[ -z "${deepgram_key}" ]]; do
-        read -p "Enter your Deepgram API key: " -r deepgram_key
-        if [[ -z "${deepgram_key}" ]]; then
-            echo "API key is required for transcription."
-        fi
-    done
-fi
-
-echo
-
-# Microphone configuration (optional)
-mic_preference=""
-mic_blacklist=""
-echo "🎤 Microphone Configuration (optional)"
-echo "You can set preferred microphones and blacklist others."
-echo "The tool will auto-select the first available preferred mic."
-echo
-echo "Detecting available microphones..."
-if command_exists ffmpeg; then
-    ffmpeg -f avfoundation -list_devices true -i "" 2>&1 | grep -A 20 "audio devices" | grep "^\[" | grep -v "audio devices" | sed 's/.*\] /  /'
-fi
-echo
-read -p "Preferred mics (comma-separated, or Enter to skip): " -r mic_preference
-read -p "Blacklisted mics (comma-separated, or Enter to skip): " -r mic_blacklist
-
-echo
-
-# Check for existing installation
-if [[ -d "$TARGET_DIR" ]]; then
-    echo "🔄 Existing installation found at $TARGET_DIR"
-    if ask_yes_no "Overwrite existing installation?" "y"; then
-        echo "Backing up existing installation..."
-        mv "$TARGET_DIR" "$TARGET_DIR.backup.$(date +%Y%m%d_%H%M%S)"
+# Check Node.js (needed for setup CLI)
+if ! command_exists node; then
+    echo "❌ Node.js not found"
+    if ask_yes_no "Install Node.js via Homebrew?" "y"; then
+        brew install node
     else
-        echo "Installation cancelled."
-        exit 0
+        echo "❌ Node.js is required for the setup CLI. Exiting."; exit 1
     fi
+else
+    echo "✅ Node.js"
 fi
 
-# Install files by creating symlinks for development
-echo "📦 Linking files for development..."
+echo
+
+# --- 2. Build FluidAudio bridge ---
+
+echo "🔨 Building FluidAudio bridge (local STT)..."
+if command_exists swift; then
+    BRIDGE_DIR="$PROJECT_DIR/tools/fluidaudio-bridge"
+    if cd "$BRIDGE_DIR" && swift build -c release 2>&1; then
+        echo "✅ FluidAudio bridge built"
+    else
+        echo "⚠️  FluidAudio build failed. Local STT won't be available."
+        echo "   Cloud providers still work. Install Xcode to fix."
+    fi
+    cd "$PROJECT_DIR"
+else
+    echo "⚠️  Swift not found. Run xcode-select --install for local STT."
+fi
+
+echo
+
+# --- 3. Install npm dependencies and run interactive setup ---
+
+echo "📦 Installing dependencies..."
+cd "$PROJECT_DIR"
+npm install --silent 2>/dev/null
+
+echo
+echo "⚙️  Configuration"
+echo "-----------------"
+node setup.js
+
+echo
+
+# --- 4. Link files ---
+
+echo "📦 Linking files..."
 mkdir -p "${TARGET_DIR}/scripts"
-
-# Link Hammerspoon script
-echo "Linking Hammerspoon configuration..."
 ln -sf "$PROJECT_DIR/hammerspoon/init.lua" "$TARGET_DIR/init.lua"
-
-# Link transcription script
 ln -sf "$PROJECT_DIR/scripts/transcribe_and_copy.py" "$TARGET_DIR/scripts/transcribe_and_copy.py"
-
-# Create .env file in project root and link it
-{
-    echo "DEEPGRAM_API_KEY=${deepgram_key}"
-    if [[ -n "${mic_preference}" ]]; then
-        echo "MIC_PREFERENCE=${mic_preference}"
-    fi
-    if [[ -n "${mic_blacklist}" ]]; then
-        echo "MIC_BLACKLIST=${mic_blacklist}"
-    fi
-} > "$PROJECT_DIR/.env"
+ln -sf "$PROJECT_DIR/scripts/level_meter.py" "$TARGET_DIR/scripts/level_meter.py"
+ln -sf "$PROJECT_DIR/tools" "$TARGET_DIR/tools"
 ln -sf "$PROJECT_DIR/.env" "$TARGET_DIR/.env"
-echo "🔑 Configuration stored in ${PROJECT_DIR}/.env and linked."
-echo "   (Make sure to add .env to your .gitignore file)"
-
+ln -sf "$PROJECT_DIR/hammerspoon/init.lua" "$HAMMERSPOON_INIT"
 echo "✅ Files linked to ${TARGET_DIR}"
 
-# Symlink the main init.lua file that Hammerspoon loads
-ln -sf "$PROJECT_DIR/hammerspoon/init.lua" "$HAMMERSPOON_INIT"
-echo "✅ Main Hammerspoon config linked."
+# --- 5. Install fwf command ---
 
-# Reload Hammerspoon
-echo "🔄 Restarting Hammerspoon to apply changes..."
-killall Hammerspoon && sleep 1 && open -a Hammerspoon 2>/dev/null || echo "Note: Hammerspoon may not have been running."
-
-# Add Hammerspoon to login items
-echo
-echo "⚙️  Setting up automatic startup..."
-echo "📋 Note: Hammerspoon must be running for free-whisper-flow to work."
-if ask_yes_no "Add Hammerspoon to login items so it starts automatically?" "y"; then
-    # Check if Hammerspoon is already in login items
-    if ! osascript -e 'tell application "System Events" to get the name of every login item' 2>/dev/null | grep -q "Hammerspoon"; then
-        echo "Adding Hammerspoon to login items..."
-        if osascript -e 'tell application "System Events" to make login item at end with properties {path:"/Applications/Hammerspoon.app", hidden:false}' 2>/dev/null; then
-            echo "✅ Hammerspoon will now start automatically when you log in"
-        else
-            echo "⚠️  Could not automatically add Hammerspoon to login items."
-            echo "   You can manually enable this in Hammerspoon > Preferences > Launch Hammerspoon at login"
-        fi
-    else
-        echo "✅ Hammerspoon is already in login items"
-    fi
+echo "📦 Installing fwf settings command..."
+FWF_BIN="/usr/local/bin/fwf"
+cat > /tmp/fwf_launcher <<SCRIPT
+#!/usr/bin/env bash
+cd "$PROJECT_DIR" && node setup.js --settings
+SCRIPT
+chmod +x /tmp/fwf_launcher
+if sudo mv /tmp/fwf_launcher "$FWF_BIN" 2>/dev/null; then
+    echo "✅ Run 'fwf' anytime to change settings"
 else
-    echo "⚠️  Skipped adding to login items."
-    echo "   Remember: You'll need to manually start Hammerspoon each time you restart your computer."
-    echo "   You can enable auto-start later in Hammerspoon Preferences."
+    # Fallback: put in user-local bin
+    mkdir -p "$HOME/.local/bin"
+    mv /tmp/fwf_launcher "$HOME/.local/bin/fwf"
+    echo "✅ Run '~/.local/bin/fwf' to change settings (add ~/.local/bin to PATH)"
+fi
+
+# --- 6. Start Hammerspoon ---
+
+echo
+echo "🔄 Starting Hammerspoon..."
+killall Hammerspoon 2>/dev/null && sleep 1
+open -a Hammerspoon 2>/dev/null || echo "Note: Open Hammerspoon manually from Applications."
+
+# Add to login items
+if ask_yes_no "Add Hammerspoon to login items (auto-start on boot)?" "y"; then
+    if ! osascript -e 'tell application "System Events" to get the name of every login item' 2>/dev/null | grep -q "Hammerspoon"; then
+        osascript -e 'tell application "System Events" to make login item at end with properties {path:"/Applications/Hammerspoon.app", hidden:false}' 2>/dev/null \
+            && echo "✅ Hammerspoon will start on boot" \
+            || echo "⚠️  Could not add to login items. Enable manually in Hammerspoon > Preferences."
+    else
+        echo "✅ Already in login items"
+    fi
 fi
 
 echo
-echo "🎉 Installation Complete!"
-echo "===================="
+echo "🎉 Setup complete!"
 echo
 echo "Next steps:"
-echo "1. If Hammerspoon isn't running, open it from Applications"
-echo "2. Grant Accessibility permissions when prompted"
-echo "3. Grant Microphone permissions when you first record"
+echo "  1. Grant Accessibility permissions when prompted"
+echo "  2. Grant Microphone permissions on first recording"
 echo
-echo "Usage:"
-echo "• Press Cmd+Shift+X to start/stop recording"
-echo "• Recordings are saved to ~/Recordings"
-echo "• Transcripts are automatically copied to clipboard"
-echo "• Uses your system's default microphone (set in System Settings > Sound)"
-echo
-echo "Files installed:"
-echo "• Configuration: ${TARGET_DIR}"
-echo "• API key: configured in ${TARGET_DIR}/.env"
+HOTKEY=$(grep "^HOTKEY=" "$PROJECT_DIR/.env" 2>/dev/null | cut -d= -f2 || echo "cmd+shift+m")
+echo "Press ${HOTKEY} to start recording. Run 'fwf' to change settings."
 echo

@@ -6,3 +6,9 @@
 
 # Ignore backup directories created by the installer
 *.backup.*
+
+# Swift build artifacts
+tools/fluidaudio-bridge/.build/
+
+# Node
+node_modules/

@@ -1,8 +1,8 @@
 ## free-whisper-flow
 
-Free version of: Whisper Flow, Aqua Voice, Willow Voice, SuperWhisper, MacWhisper
+Free, open-source alternative to [Wispr Flow](https://wispr.flow), [SuperWhisper](https://superwhisper.com), Aqua Voice, and others. Runs locally on Apple Silicon with ~3% word error rate and ~325ms latency - nearly as accurate as ElevenLabs (2.3% WER) and fast enough to feel instant. No subscription, no API key required.
 
-Type faster by using your voice - for free. Press **Cmd+Shift+M** (or the **Fn/Globe key**), speak, and get the transcript pasted or copied the moment you stop. Real-time audio streaming with a live waveform visualization for near-instant results. Hackable, with zero vendor lock-in.
+Press **Cmd+Shift+M** (or the **Fn/Globe key**), speak, and get the transcript pasted the moment you stop. Live waveform visualization, smart paste, and zero vendor lock-in.
 
 https://github.com/user-attachments/assets/3c51bfbc-3645-4828-95f0-d75fc8b34838
 
@@ -18,9 +18,12 @@ cd free-whisper-flow
 
 The installer will:
 
-- Install dependencies (Homebrew, ffmpeg, Hammerspoon, uv)
-- Configure your microphone, API key, and Hammerspoon
-- Optionally add Hammerspoon to login items for auto-startup
+- Install dependencies (Homebrew, ffmpeg, Hammerspoon)
+- Build the FluidAudio bridge for local transcription
+- Walk you through an interactive setup (provider, microphone, hotkey)
+- Start Hammerspoon and optionally add it to login items
+
+The FluidAudio model (~600MB) downloads automatically on your first transcription. Run `fwf` anytime to change settings.
 
 ## Usage
 
@@ -32,33 +35,38 @@ The installer will:
 
 ## Configuration
 
-All settings are in your `.env` file:
+All settings live in `.env` (created by the installer, or run `fwf` to reconfigure):
 
 ```bash
-# STT provider: "elevenlabs" (default, more accurate) or "deepgram"
-STT_PROVIDER=elevenlabs
+# STT provider: "fluidaudio" (local, free), "elevenlabs", or "deepgram"
+STT_PROVIDER=fluidaudio
 
-# API keys (only the one matching your provider is needed)
-ELEVENLABS_API_KEY=your_key_here
-DEEPGRAM_API_KEY=your_key_here
+# Hotkey to start/stop recording
+HOTKEY=cmd+shift+m
 
-# Comma-separated list of preferred mics (first available wins)
-MIC_PREFERENCE=BY-GM18CU,MacBook Air Microphone
-
-# Comma-separated list of mics to never use
+# Microphone preferences
+MIC_PREFERENCE=MacBook Air Microphone
 MIC_BLACKLIST=airpods
+
+# --- Optional, only if using cloud providers ---
+# ELEVENLABS_API_KEY=your_key_here
+# DEEPGRAM_API_KEY=your_key_here
+
+# --- Optional: LLM transcript cleanup via Groq (removes filler words) ---
+# GROQ_API_KEY=your_key_here
 ```
 
 ### STT Providers
 
-- **ElevenLabs Scribe v2** (default) - ~2.3% word error rate, ~2s latency for 8s of audio. Requires an [ElevenLabs API key](https://elevenlabs.io).
-- **Deepgram Nova-2** - ~8.4% word error rate, real-time latency. Requires a [Deepgram API key](https://deepgram.com) (comes with $200 in free credits).
+- **FluidAudio** (local, default) - ~3% word error rate, ~0.2s latency. Runs entirely on-device using [FluidAudio](https://github.com/FluidInference/FluidAudio) with the Parakeet TDT 0.6b model on Apple's Neural Engine. Free, offline, no API key needed. One-time model download (~600MB) on first use.
+- **ElevenLabs Scribe v2** (cloud) - ~2.3% word error rate, ~2s latency. Requires an [ElevenLabs API key](https://elevenlabs.io).
+- **Deepgram Nova-2** (cloud) - ~8.4% word error rate, real-time streaming. Requires a [Deepgram API key](https://deepgram.com) (comes with $200 in free credits).
 
-Switch providers by changing `STT_PROVIDER` in `.env`. Both API keys can coexist so you can switch back anytime.
+Switch providers by changing `STT_PROVIDER` in `.env` or running `fwf`.
 
 ### Microphone Selection
 
-The tool auto-detects available microphones on each recording. It checks `MIC_PREFERENCE` in order and picks the first connected device, skipping anything in `MIC_BLACKLIST`. Falls back to system default if nothing matches.
+The tool auto-detects available microphones and picks the first connected device from `MIC_PREFERENCE`, skipping anything in `MIC_BLACKLIST`. Falls back to system default if nothing matches. The selection is cached and refreshes when devices change (e.g. plugging in a mic).
 
 To see your available devices:
 
@@ -66,9 +74,11 @@ To see your available devices:
 ffmpeg -f avfoundation -list_devices true -i "" 2>&1 | grep -A 20 "audio devices"
 ```
 
-### Fn/Globe Key Binding
+### Hotkey
 
-To use the Fn/Globe key as a trigger, install [Karabiner-Elements](https://karabiner-elements.pqrs.org/) and add a rule to remap Fn to F18. The tool listens for F18 automatically.
+The default hotkey is **Cmd+Shift+M**. Change it via `HOTKEY` in `.env` (e.g. `HOTKEY=ctrl+alt+r`). Supports `cmd`, `ctrl`, `alt`, `shift` modifiers.
+
+The **Fn/Globe key** also works as a trigger. Install [Karabiner-Elements](https://karabiner-elements.pqrs.org/) and add a rule to remap Fn to F18. The tool listens for F18 automatically.
 
 ## Features
 
@@ -77,12 +87,40 @@ To use the Fn/Globe key as a trigger, install [Karabiner-Elements](https://karab
 - **Clipboard preservation** - your clipboard contents are restored after pasting
 - **System audio muting** - automatically mutes system audio during recording to prevent feedback
 - **Audio boost** - 2x volume boost for better recognition of quiet speech
-- **Sound feedback** - distinct start/stop sounds
+- **Sound feedback** - audio cue on start/stop
 - **Seamless transitions** - waveform -> spinner -> result notification in a single overlay
 
 ## How It Works
 
-`ffmpeg` captures audio from your microphone and pipes it to a Python script via `tee` (splitting to both a level meter for the waveform and the transcription service). The Python script streams audio over a WebSocket to ElevenLabs or Deepgram and collects the transcript. Hammerspoon handles the global hotkey, waveform visualization, and paste/clipboard logic.
+Hammerspoon handles the global hotkey, waveform visualization, and paste/clipboard logic. `ffmpeg` captures audio from your microphone. What happens next depends on the provider:
+
+- **Cloud providers** (ElevenLabs/Deepgram): Audio is piped to a Python script that streams it over a WebSocket to the cloud API in real-time. Transcription results arrive as you speak.
+- **FluidAudio** (local): Audio is saved to a temp WAV file while you speak. When you stop, a Swift CLI runs the Parakeet TDT model on Apple's Neural Engine and returns the transcript. No network required.
+
+Both paths support optional LLM cleanup via Groq (removes filler words, fixes punctuation).
+
+## Benchmarks
+
+Measured on M4 MacBook Air (32GB), recording ~6s of speech:
+
+**Start latency** (keypress to audio capture):
+- ~96ms with cached mic selection
+- ~350ms on first recording after reload (mic device scan)
+
+**Stop-to-paste latency** (stop recording to text appearing):
+- **FluidAudio (local)**: ~325ms transcription only, ~500ms with Groq cleanup
+- **Deepgram (cloud)**: ~800ms including Groq cleanup (in Python)
+- **ElevenLabs (cloud)**: ~800ms including Groq cleanup (in Python)
+
+**Word error rate** (lower is better):
+- **ElevenLabs Scribe v2**: ~2.3% - best accuracy
+- **FluidAudio Parakeet TDT 0.6b**: ~3% - close to ElevenLabs, runs locally for free
+- **Deepgram Nova-2**: ~8.4% - fastest cloud streaming, lower accuracy
+
+**Cost**:
+- **FluidAudio**: free, offline, runs on Apple Neural Engine
+- **Deepgram**: API pricing ($200 in free credits on signup)
+- **ElevenLabs**: API pricing
 
 ## Development
 
@@ -94,8 +132,10 @@ killall Hammerspoon && sleep 1 && open -a Hammerspoon
 
 ## Requirements
 
-- **macOS**
-- An [ElevenLabs](https://elevenlabs.io) or [Deepgram](https://deepgram.com) API key
+- **macOS 14+** and **Apple Silicon** (M1 or later)
+- **Xcode** or Command Line Tools (`xcode-select --install`)
+
+That's it. The default local provider (FluidAudio) needs no API keys and works offline. Cloud providers (ElevenLabs, Deepgram) are optional and need API keys.
 
 ## Permissions
 
