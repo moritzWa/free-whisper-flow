@@ -92,7 +92,7 @@ echo
 
 # --- 2. Build FluidAudio bridge ---
 
-echo "🔨 Building FluidAudio bridge (local STT, this takes 1-2 minutes)..."
+echo "🔨 Building FluidAudio bridge (local STT, this takes ~3 minutes)..."
 if command_exists swift; then
     BRIDGE_DIR="$PROJECT_DIR/tools/fluidaudio-bridge"
     if cd "$BRIDGE_DIR" && swift build -c release 2>&1; then
@@ -154,7 +154,7 @@ fi
 # --- 6. Start Hammerspoon ---
 
 echo
-echo "🔄 Starting Hammerspoon..."
+echo "🔄 Starting Hammerspoon (handles hotkeys and UI for free-whisper-flow)..."
 killall Hammerspoon 2>/dev/null && sleep 1
 open -a Hammerspoon 2>/dev/null || echo "Note: Open Hammerspoon manually from Applications."
 sleep 2  # Give Hammerspoon a moment to launch
@@ -162,27 +162,16 @@ sleep 2  # Give Hammerspoon a moment to launch
 # Close the Hammerspoon Preferences window if it popped up (first launch)
 osascript -e 'tell application "System Events" to tell process "Hammerspoon" to click button 1 of window "Hammerspoon Preferences"' &>/dev/null || true
 
-# Add to login items
-if ask_yes_no "Add Hammerspoon to login items (auto-start on boot)?" "y"; then
-    if ! osascript -e 'tell application "System Events" to get the name of every login item' 2>/dev/null | grep -q "Hammerspoon"; then
-        osascript -e 'tell application "System Events" to make login item at end with properties {path:"/Applications/Hammerspoon.app", hidden:false}' 2>/dev/null \
-            && echo "✅ Hammerspoon will start on boot" \
-            || echo "⚠️  Could not add to login items. Enable manually in Hammerspoon > Preferences."
-    else
-        echo "✅ Already in login items"
-    fi
-fi
-
 # --- 7. Ensure Accessibility permissions ---
+# Do this BEFORE login items, since the popups appear immediately
 
 echo
-echo "🔐 Checking Accessibility permissions..."
-echo "   (If a Hammerspoon popup appeared, you can ignore it - we handle permissions here.)"
+echo "🔐 Hammerspoon needs Accessibility permissions to listen for your hotkey."
+echo "   You may see a macOS popup and a Hammerspoon window - that's expected."
 echo
 
 # Check if Hammerspoon has accessibility access
 if ! osascript -e 'tell application "System Events" to key code 0' &>/dev/null; then
-    echo "   Hammerspoon needs Accessibility permissions to detect hotkeys."
     echo "   Opening System Settings - please toggle Hammerspoon ON, then come back here."
     echo
     open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
@@ -198,6 +187,19 @@ if ! osascript -e 'tell application "System Events" to key code 0' &>/dev/null; 
     open -a Hammerspoon 2>/dev/null
 else
     echo "✅ Accessibility permissions already granted"
+fi
+
+echo
+
+# Add to login items
+if ask_yes_no "Add Hammerspoon to login items (auto-start on boot)?" "y"; then
+    if ! osascript -e 'tell application "System Events" to get the name of every login item' 2>/dev/null | grep -q "Hammerspoon"; then
+        osascript -e 'tell application "System Events" to make login item at end with properties {path:"/Applications/Hammerspoon.app", hidden:false}' 2>/dev/null \
+            && echo "✅ Hammerspoon will start on boot" \
+            || echo "⚠️  Could not add to login items. Enable manually in Hammerspoon > Preferences."
+    else
+        echo "✅ Already in login items"
+    fi
 fi
 
 echo
