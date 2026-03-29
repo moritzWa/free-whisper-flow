@@ -157,6 +157,10 @@ echo
 echo "🔄 Starting Hammerspoon..."
 killall Hammerspoon 2>/dev/null && sleep 1
 open -a Hammerspoon 2>/dev/null || echo "Note: Open Hammerspoon manually from Applications."
+sleep 2  # Give Hammerspoon a moment to launch
+
+# Close the Hammerspoon Preferences window if it popped up (first launch)
+osascript -e 'tell application "System Events" to tell process "Hammerspoon" to click button 1 of window "Hammerspoon Preferences"' &>/dev/null || true
 
 # Add to login items
 if ask_yes_no "Add Hammerspoon to login items (auto-start on boot)?" "y"; then
@@ -169,25 +173,25 @@ if ask_yes_no "Add Hammerspoon to login items (auto-start on boot)?" "y"; then
     fi
 fi
 
-echo
 # --- 7. Ensure Accessibility permissions ---
 
 echo
 echo "🔐 Checking Accessibility permissions..."
-sleep 2  # Give Hammerspoon a moment to start and request permissions
+echo "   (If a Hammerspoon popup appeared, you can ignore it - we handle permissions here.)"
+echo
 
 # Check if Hammerspoon has accessibility access
 if ! osascript -e 'tell application "System Events" to key code 0' &>/dev/null; then
-    echo "⚠️  Hammerspoon needs Accessibility permissions to detect hotkeys."
+    echo "   Hammerspoon needs Accessibility permissions to detect hotkeys."
     echo "   Opening System Settings - please toggle Hammerspoon ON, then come back here."
     echo
     open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-    echo -n "   Waiting for you to grant permission..."
+    printf "   Waiting for you to grant permission"
     while ! osascript -e 'tell application "System Events" to key code 0' &>/dev/null 2>&1; do
         sleep 2
-        echo -n "."
+        printf "."
     done
-    echo
+    echo ""
     echo "✅ Accessibility permissions granted!"
     # Restart Hammerspoon to pick up permissions
     killall Hammerspoon 2>/dev/null && sleep 1
