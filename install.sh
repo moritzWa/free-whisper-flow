@@ -92,7 +92,7 @@ echo
 
 # --- 2. Build FluidAudio bridge ---
 
-echo "🔨 Building FluidAudio bridge (local STT)..."
+echo "🔨 Building FluidAudio bridge (local STT, this takes 1-2 minutes)..."
 if command_exists swift; then
     BRIDGE_DIR="$PROJECT_DIR/tools/fluidaudio-bridge"
     if cd "$BRIDGE_DIR" && swift build -c release 2>&1; then

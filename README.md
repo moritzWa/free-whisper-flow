@@ -143,3 +143,13 @@ You will be prompted to grant permissions for:
 - **Microphone**: macOS will ask on the first recording attempt.
 
 The installer offers to add Hammerspoon to login items, which is recommended so it's always running.
+
+## Uninstall
+
+```bash
+rm -rf ~/.hammerspoon
+sudo rm -f /usr/local/bin/fwf
+brew uninstall --cask hammerspoon  # optional, only if you want to remove Hammerspoon entirely
+```
+
+Then delete the cloned repo folder and remove Hammerspoon from System Settings > Privacy & Security > Accessibility.

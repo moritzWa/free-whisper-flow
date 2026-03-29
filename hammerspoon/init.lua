@@ -212,7 +212,7 @@ end
 
 -- Shared overlay style constants
 local OVERLAY_BG = { red = 0.1, green = 0.1, blue = 0.1, alpha = 0.85 }
-local OVERLAY_RADIUS = 10
+local OVERLAY_RADIUS = 32  -- fully round pill shape
 local OVERLAY_BOTTOM_OFFSET = 40
 
 -- Waveform visualization
@@ -405,8 +405,8 @@ local function updateWaveform()
   -- Update bar heights (element indices are offset by 1 for the background)
   for i = 1, NUM_BARS do
     local l = levelHistory[i]
-    -- Aggressive scaling: sqrt for more visible quiet speech, then boost
-    local scaled = math.min(1.0, math.sqrt(l) * 2.5)
+    -- Linear scaling, no artificial boost
+    local scaled = math.min(1.0, l * 1.5)
     -- Minimum bar height so there's always visible activity
     local minHeight = 4
     local barHeight = math.max(minHeight, scaled * CANVAS_HEIGHT)
