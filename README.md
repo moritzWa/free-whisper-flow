@@ -4,8 +4,6 @@ Free, open-source alternative to [Wispr Flow](https://wispr.flow), [SuperWhisper
 
 Press **Cmd+Shift+M** (or the **Fn/Globe key**), speak, and get the transcript pasted the moment you stop. Live waveform visualization, smart paste, and zero vendor lock-in.
 
-https://github.com/user-attachments/assets/3c51bfbc-3645-4828-95f0-d75fc8b34838
-
 ## Installation
 
 Clone this repository and run the installer:
